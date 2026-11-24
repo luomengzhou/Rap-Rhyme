@@ -260,3 +260,7 @@ a { color: var(--accent); }
 .mat p { margin: 6px 0; color: #c9ccd6; }
 .mat-src { color: var(--dim); font-size: 12px; margin-top: 4px; }
 .mat-text { border-left: 2px solid var(--line); padding-left: 10px; color: var(--ink) !important; }
+.mat-form { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.mat-form .row input { flex: 1; min-width: 0; }
+.mat-form textarea { line-height: 1.6; resize: vertical; }
+.mat-text { white-space: pre-wrap; }

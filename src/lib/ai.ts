@@ -87,14 +87,13 @@ export function buildInput(title: string, draft: string, turns: Turn[], facts = 
 const FENCE = /```json\s*([\s\S]*?)(```|$)/
 
 /** 把回答拆成给人看的文字和建议 */
-export function splitReply(raw: string): { text: string; suggestions: Suggestion[]; materials: Material[] } {
+export function splitReply(raw: string, stamp = ''): { text: string; suggestions: Suggestion[]; materials: Material[] } {
   const m = FENCE.exec(raw)
   const text = (m ? raw.slice(0, m.index) + raw.slice(m.index + m[0].length) : raw).trim()
   if (!m || !m[2]) return { text, suggestions: [], materials: [] }
   try {
     const data = JSON.parse(m[1]) as { suggestions?: unknown; materials?: unknown }
     const list = Array.isArray(data.suggestions) ? data.suggestions : []
-    const stamp = Date.now().toString(36)
     const suggestions: Suggestion[] = []
     list.forEach((x, i) => {
       const s = x as Partial<Suggestion>

@@ -52,7 +52,7 @@ const IDEA_STARTERS = [
 
 const searchUrl = (m: Material) => 'https://www.bing.com/search?q=' + encodeURIComponent(`${m.title} ${m.source}`.trim())
 
-function MaterialCard({ m, saved, onToggle }: { m: Material; saved: boolean; onToggle: () => void }) {
+function MaterialCard({ m, saved, onToggle, onEdit }: { m: Material; saved: boolean; onToggle: () => void; onEdit?: () => void }) {
   return (
     <article className={`mat${saved ? ' on' : ''}`}>
       <div className="sug-head">
@@ -63,7 +63,8 @@ function MaterialCard({ m, saved, onToggle }: { m: Material; saved: boolean; onT
       {m.text && <p className="mat-text">{m.text}</p>}
       {m.use && <p>{m.use}</p>}
       <div className="row tight">
-        <button className={saved ? 'primary' : ''} onClick={onToggle}>{saved ? '已收藏' : '收藏'}</button>
+        <button className={saved ? 'primary' : ''} onClick={onToggle}>{saved ? (onEdit ? '取消收藏' : '已收藏') : '收藏'}</button>
+        {onEdit && <button className="link" onClick={onEdit}>改</button>}
         <a className="right" href={searchUrl(m)} target="_blank" rel="noreferrer">搜原文核对</a>
       </div>
     </article>
@@ -85,8 +86,18 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
   const chat = cur.chat ?? []
   const saved = cur.materials ?? []
   const idea = text.split('\n').filter((l) => l.trim() && !/^\s*[[【（(]/.test(l)).length < 4
+  const matNotes = saved.length
+    ? '\n作者为这份草稿收藏的素材（可以直接引用、接着聊）：\n' + saved.slice(0, 20).map((m) => `- [${m.kind}] ${m.title}${m.source ? '（' + m.source + '）' : ''}：${m.text.slice(0, 600)}${m.use ? ' 用法：' + m.use : ''}`).join('\n')
+    : ''
+  const [matForm, setMatForm] = useState<Material | null>(null)
+  const saveMat = () => {
+    if (!matForm || !matForm.title.trim()) return
+    const m = { ...matForm, title: matForm.title.trim() }
+    setState({ ...cur, materials: saved.some((x) => x.id === m.id) ? saved.map((x) => (x.id === m.id ? m : x)) : [m, ...saved] })
+    setMatForm(null)
+  }
   const toggleMat = (m: Material) =>
-    setState({ ...cur, materials: saved.some((x) => x.title === m.title) ? saved.filter((x) => x.title !== m.title) : [...saved, m] })
+    setState({ ...cur, materials: saved.some((x) => x.title === m.title) ? saved.filter((x) => x.title !== m.title) : [...saved, { ...m, id: 'm' + Math.random().toString(36).slice(2, 10) }] })
 
   const [tab, setTab] = useState<'chat' | 'list' | 'mats'>('chat')
   const [error, setError] = useState('')
@@ -141,7 +152,7 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
     ctl.current = new AbortController()
     let answer = ''
     try {
-      const res = await sample(buildInput(title, text, turns, facts), {
+      const res = await sample(buildInput(title, text, turns, facts + matNotes), {
         cache: false,
         signal: ctl.current.signal,
         onText: ({ text: t }) => setStreaming(splitReply(t).text),
@@ -155,7 +166,7 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
     setStreaming(null)
     if (!answer.trim()) return
     const now = latest.current
-    const { suggestions } = splitReply(answer)
+    const { suggestions } = splitReply(answer, Date.now().toString(36))
     setState({
       ...now,
       chat: [...(now.chat ?? turns), { role: 'assistant', content: answer }],
@@ -282,8 +293,8 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
                     {parsed ? parsed.text : t.content}
                     {parsed && parsed.materials.length > 0 && (
                       <div className="mats">
-                        {parsed.materials.map((m) => (
-                          <MaterialCard key={m.id} m={m} saved={saved.some((x) => x.title === m.title)} onToggle={() => toggleMat(m)} />
+                        {parsed.materials.map((m, k) => (
+                          <MaterialCard key={k} m={m} saved={saved.some((x) => x.title === m.title)} onToggle={() => toggleMat(m)} />
                         ))}
                       </div>
                     )}
@@ -341,9 +352,30 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
         {tab === 'mats' && (
           <div className="pane">
             <p className="muted">这份草稿收藏的典故、诗词、意象和参考歌曲。内容是 Claude 凭记忆给的，用之前点“搜原文核对”确认一下。</p>
-            {saved.length === 0 && <p className="muted">还没有收藏。去和 Claude 聊这首的主题，让它给素材。</p>}
+            {matForm ? (
+              <form className="mat-form" onSubmit={(e) => { e.preventDefault(); saveMat() }}>
+                <div className="row tight">
+                  <select id="mat-kind" value={matForm.kind} onChange={(e) => setMatForm({ ...matForm, kind: e.target.value })}>
+                    {['歌曲', '歌词', '诗词', '典故', '神话', '寓言', '文学', '意象', '说法', '其他'].map((k) => <option key={k}>{k}</option>)}
+                  </select>
+                  <input id="mat-title" value={matForm.title} onChange={(e) => setMatForm({ ...matForm, title: e.target.value })} placeholder="名字，比如歌名" />
+                </div>
+                <input id="mat-source" value={matForm.source} onChange={(e) => setMatForm({ ...matForm, source: e.target.value })} placeholder="出处：歌手、作者、作品" />
+                <textarea id="mat-text" rows={6} value={matForm.text} onChange={(e) => setMatForm({ ...matForm, text: e.target.value })} placeholder="原文、歌词片段，或你自己的记录" />
+                <input id="mat-use" value={matForm.use} onChange={(e) => setMatForm({ ...matForm, use: e.target.value })} placeholder="想怎么用（可不填）" />
+                <div className="row tight">
+                  <button type="submit" className="primary" disabled={!matForm.title.trim()}>保存</button>
+                  <button type="button" onClick={() => setMatForm(null)}>取消</button>
+                </div>
+              </form>
+            ) : (
+              <div className="row">
+                <button onClick={() => setMatForm({ id: 'm' + Math.random().toString(36).slice(2, 10), kind: '歌词', title: '', source: '', text: '', use: '' })}>自己加一条</button>
+              </div>
+            )}
+            {saved.length === 0 && !matForm && <p className="muted">还没有收藏。可以和 Claude 聊主题让它给素材，也可以把自己查到的原文、歌词加进来。</p>}
             <div className="mats">
-              {saved.map((m) => <MaterialCard key={m.id} m={m} saved onToggle={() => toggleMat(m)} />)}
+              {saved.map((m) => <MaterialCard key={m.id} m={m} saved onToggle={() => toggleMat(m)} onEdit={() => setMatForm(m)} />)}
             </div>
           </div>
         )}
