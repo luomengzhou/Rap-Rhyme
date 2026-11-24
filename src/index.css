@@ -15,7 +15,7 @@
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
-body { background: var(--bg); font-size: 14px; }
+body { background: var(--bg); color: var(--ink); font-size: 14px; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
 button:hover:not(:disabled) { border-color: #4a5060; }
