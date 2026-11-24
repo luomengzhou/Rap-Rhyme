@@ -1,0 +1,115 @@
+import { useMemo, useState } from 'react'
+import { findRhymes, toSyls, type Mode, type RhymeIndex } from '../lib/rhyme'
+import { N_LABEL } from '../lib/palette'
+
+interface Props {
+  index: RhymeIndex | null
+  query: string
+  setQuery: (q: string) => void
+  mode: Mode
+  setMode: (m: Mode) => void
+  blocked: string[]
+  setBlocked: (b: string[]) => void
+  liked: string[]
+  setLiked: (b: string[]) => void
+  /** 点一个词：插入到草稿光标处 */
+  onPick?: (w: string) => void
+}
+
+const SHOW = 240
+
+export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, setBlocked, liked, setLiked, onPick }: Props) {
+  const [n, setN] = useState(2)
+  const [sameTone, setSameTone] = useState(false)
+  const [showRare, setShowRare] = useState(false)
+  const [length, setLength] = useState(0)
+  const [all, setAll] = useState(false)
+
+  const syls = useMemo(() => toSyls(query), [query])
+  const maxN = Math.min(4, syls.length)
+  const useN = Math.min(n, Math.max(1, maxN))
+  const blockedSet = useMemo(() => new Set(blocked), [blocked])
+  const likedSet = useMemo(() => new Set(liked), [liked])
+
+  const { hits, counts } = useMemo(() => {
+    if (!index || !syls.length) return { hits: [], counts: [0, 0, 0, 0] }
+    const base = { mode, sameTone, showRare, length, blocked: blockedSet }
+    const counts = [1, 2, 3, 4].map((k) => (k <= maxN ? findRhymes(index, query, { ...base, n: k }).length : 0))
+    const hits = findRhymes(index, query, { ...base, n: useN })
+    hits.sort((a, b) => Number(likedSet.has(b.word.w)) - Number(likedSet.has(a.word.w)))
+    return { hits, counts }
+  }, [index, query, syls.length, mode, sameTone, showRare, length, blockedSet, likedSet, useN, maxN])
+
+  const shown = all ? hits : hits.slice(0, SHOW)
+  const tail = syls.slice(-useN)
+
+  return (
+    <div className="rhyme">
+      <input
+        className="q"
+        value={query}
+        placeholder="输入一个词，比如 不错"
+        onChange={(e) => {
+          setQuery(e.target.value)
+          setAll(false)
+        }}
+      />
+      <div className="row">
+        <div className="seg">
+          {[1, 2, 3, 4].map((k) => (
+            <button key={k} className={k === useN ? 'on' : ''} disabled={k > maxN} onClick={() => setN(k)}>
+              {N_LABEL[k]}
+              <small>{k <= maxN ? counts[k - 1] : ''}</small>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="row opts">
+        <div className="seg small">
+          <button className={mode === 'strict' ? 'on' : ''} onClick={() => setMode('strict')} title="按实际听感：主要元音和韵尾都相同才算">严格</button>
+          <button className={mode === 'loose' ? 'on' : ''} onClick={() => setMode('loose')} title="再合并 en/eng、in/ing、e/o 等相近的韵，结果里会标出来">含宽押</button>
+        </div>
+        <label><input type="checkbox" checked={sameTone} onChange={(e) => setSameTone(e.target.checked)} />末字同声调</label>
+        <label><input type="checkbox" checked={showRare} onChange={(e) => setShowRare(e.target.checked)} />生僻词</label>
+        <select value={length} onChange={(e) => setLength(Number(e.target.value))}>
+          <option value={0}>字数不限</option>
+          <option value={2}>2 个字</option>
+          <option value={3}>3 个字</option>
+          <option value={4}>4 个字</option>
+        </select>
+      </div>
+
+      {!index && <p className="muted">正在加载词库…</p>}
+      {index && syls.length > 0 && (
+        <p className="muted key">
+          押的韵：{tail.map((s, i) => <code key={i}>{s.ch} {s[mode].replace('v', 'ü').replace('i*', 'i（舌尖）')}</code>)}
+        </p>
+      )}
+      {index && syls.length > 0 && hits.length === 0 && (
+        <p className="muted">
+          词库里没有常用词能{N_LABEL[useN]}上这个词。{useN >= 3 ? '三押以上的现成词本来就少，说唱里多半是几个词拼成的短语。可以先找双押，或者打开“含宽押”。' : '可以试试“含宽押”或“生僻词”。'}
+        </p>
+      )}
+      <div className="chips">
+        {shown.map(({ word, looseOnly }) => (
+          <span key={word.w} className={'chip' + (looseOnly ? ' loose' : '') + (likedSet.has(word.w) ? ' liked' : '') + (word.tier === 2 ? ' rare' : '')}>
+            <button className="w" title={word.syls.map((s) => s.py.replace('v', 'ü') + (s.tone || '')).join(' ') + (onPick ? ' · 点击插入草稿' : '')} onClick={() => onPick?.(word.w)}>
+              {word.w}
+              {looseOnly && <i>宽</i>}
+            </button>
+            <button className="act" title="喜欢，排到前面" onClick={() => setLiked(likedSet.has(word.w) ? liked.filter((x) => x !== word.w) : [...liked, word.w])}>♥</button>
+            <button className="act" title="不押或不是词，以后不再出现" onClick={() => setBlocked([...blocked, word.w])}>×</button>
+          </span>
+        ))}
+      </div>
+      {hits.length > shown.length && (
+        <button className="link" onClick={() => setAll(true)}>显示全部 {hits.length} 个</button>
+      )}
+      {blocked.length > 0 && (
+        <p className="muted foot">
+          已屏蔽 {blocked.length} 个词。<button className="link" onClick={() => setBlocked([])}>全部恢复</button>
+        </p>
+      )}
+    </div>
+  )
+}
