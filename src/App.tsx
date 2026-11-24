@@ -10,6 +10,7 @@ import { Editor } from './components/Editor'
 import { FlowView } from './components/FlowView'
 import { RhymePanel } from './components/RhymePanel'
 import { StructurePanel } from './components/StructurePanel'
+import { RefsView, type SongRef } from './components/RefsView'
 import { ReviewView, type ReviewState } from './components/ReviewView'
 import { TheoryView } from './components/TheoryView'
 
@@ -19,7 +20,7 @@ interface Draft {
   text: string
 }
 
-type View = 'write' | 'review' | 'flow' | 'theory'
+type View = 'write' | 'review' | 'flow' | 'refs' | 'theory'
 type Side = 'check' | 'rhyme' | 'structure'
 
 const newDraft = (title = '新草稿'): Draft => ({ id: Math.random().toString(36).slice(2, 10), title, text: '' })
@@ -37,10 +38,13 @@ export default function App() {
   const [blocked, setBlocked] = useStored<string[]>('rr.blocked', [])
   const [liked, setLiked] = useStored<string[]>('rr.liked', [])
   const [template, setTemplate] = useStored<SectionTpl[]>('rr.template', REGULAR_TEMPLATE)
+  const [refs, setRefs] = useStored<SongRef[]>('rr.refs', [])
   const [reviews, setReviews] = useStored<Record<string, ReviewState>>('rr.reviews', {})
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState<RhymeIndex | null>(null)
   const [playing, setPlaying] = useState(false)
+  const [confirmDel, setConfirmDel] = useState(false)
+  const [ask, setAsk] = useState('')
   const [sel, setSel] = useState({ start: 0, end: 0, text: '' })
   const input = useRef<HTMLTextAreaElement>(null)
 
@@ -112,6 +116,15 @@ export default function App() {
     setText(draft.text.trim() ? draft.text.replace(/\n*$/, '\n\n') + heads : heads)
   }
 
+  const written = analysis.sections.reduce((a, x) => a + x.bars, 0)
+  const mine = refs.filter((r) => r.draft === (draft.title || '未命名')).slice(0, 12)
+  const refNotes = mine.length
+    ? '\n作者为这份草稿记的听歌笔记（参考手法用）：\n' + mine.map((r) => `- ${r.song}${r.artist ? ' / ' + r.artist : ''}${r.at ? '，位置 ' + r.at : ''}${r.fit ? '，适合 ' + r.fit : ''}${r.note ? '，' + r.note : ''}`).join('\n')
+    : ''
+  const askClaude = (q: string) => {
+    setAsk(q)
+    setView('review')
+  }
   const picked = sel.text.trim()
   const currentLine = useMemo(() => {
     const before = draft.text.slice(0, sel.start).split('\n').length - 1
@@ -127,11 +140,12 @@ export default function App() {
           <button className={view === 'write' ? 'on' : ''} onClick={() => setView('write')}>写词</button>
           <button className={view === 'review' ? 'on' : ''} onClick={() => setView('review')}>改稿</button>
           <button className={view === 'flow' ? 'on' : ''} onClick={() => setView('flow')}>打拍</button>
+          <button className={view === 'refs' ? 'on' : ''} onClick={() => setView('refs')}>听歌笔记</button>
           <button className={view === 'theory' ? 'on' : ''} onClick={() => setView('theory')}>乐理卡</button>
         </nav>
-        {(view === 'write' || view === 'review') && (
+        {(view === 'write' || view === 'review' || view === 'refs') && (
           <div className="drafts">
-            <select value={draft.id} onChange={(e) => setActiveId(e.target.value)}>
+            <select value={draft.id} onChange={(e) => { setActiveId(e.target.value); setConfirmDel(false) }}>
               {drafts.map((d) => (
                 <option key={d.id} value={d.id}>{d.title || '未命名'}</option>
               ))}
@@ -146,17 +160,23 @@ export default function App() {
             >
               新建
             </button>
-            <button
-              disabled={drafts.length < 2}
-              onClick={() => {
-                if (draft.text.trim() && !window.confirm(`删除「${draft.title}」？这一步不能撤销。`)) return
-                const rest = drafts.filter((d) => d.id !== draft.id)
-                setDrafts(rest)
-                setActiveId(rest[0].id)
-              }}
-            >
-              删除
-            </button>
+            {confirmDel ? (
+              <>
+                <button
+                  onClick={() => {
+                    const rest = drafts.filter((d) => d.id !== draft.id)
+                    setDrafts(rest)
+                    setActiveId(rest[0].id)
+                    setConfirmDel(false)
+                  }}
+                >
+                  确定删除
+                </button>
+                <button onClick={() => setConfirmDel(false)}>取消</button>
+              </>
+            ) : (
+              <button disabled={drafts.length < 2} onClick={() => setConfirmDel(true)}>删除</button>
+            )}
           </div>
         )}
       </header>
@@ -185,7 +205,7 @@ export default function App() {
                 <RhymePanel index={index} query={query} setQuery={setQuery} mode={mode} setMode={setMode} blocked={blocked} setBlocked={setBlocked} liked={liked} setLiked={setLiked} onPick={insert} />
               )}
               {side === 'structure' && (
-                <StructurePanel analysis={analysis} template={template} setTemplate={setTemplate} bpm={bpm} onInsert={insertTemplate} onJump={jump} />
+                <StructurePanel beatId={beatId} onAsk={askClaude} analysis={analysis} template={template} setTemplate={setTemplate} bpm={bpm} onInsert={insertTemplate} onJump={jump} />
               )}
             </div>
           </aside>
@@ -196,6 +216,9 @@ export default function App() {
           key={draft.id}
           title={draft.title}
           text={draft.text}
+          facts={`当前速度 ${bpm} BPM（一小节约 ${barSeconds(bpm).toFixed(1)} 秒），唱法：${delivery.name}。草稿已写 ${written} 小节（一行算一小节），照这个速度约 ${Math.round(written * barSeconds(bpm))} 秒，不含重复的 hook、前奏和间奏。${refNotes}`}
+          ask={ask}
+          clearAsk={() => setAsk('')}
           state={reviews[draft.id]}
           setState={(s) => {
             const next = { ...reviews }
@@ -203,6 +226,7 @@ export default function App() {
             else delete next[draft.id]
             setReviews(next)
           }}
+          onWrite={setText}
           onSaveAsNew={(text) => {
             const d = { ...newDraft(`${draft.title || '未命名'}（改后）`), text }
             setDrafts([...drafts, d])
@@ -214,6 +238,11 @@ export default function App() {
       {view === 'flow' && (
         <main className="single">
           <FlowView bpm={bpm} playing={playing} start={start} currentLine={currentLine} />
+        </main>
+      )}
+      {view === 'refs' && (
+        <main className="single">
+          <RefsView refs={refs} setRefs={setRefs} draftTitle={draft.title} sections={analysis.sections.map((x) => x.name).filter((n) => n !== '未命名段落')} />
         </main>
       )}
       {view === 'theory' && (

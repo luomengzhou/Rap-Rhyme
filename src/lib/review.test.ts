@@ -52,6 +52,12 @@ describe('改稿', () => {
     const r: Review = { title: 't', suggestions: [{ id: 'x', tag: '长度', title: '', reason: '', edits: [{ find: '乖乖安睡', replace: '\n乖乖安睡' }] }] }
     expect(applyReview(TEXT, r, new Set(['x'])).text).toContain('请继续沉寂 沉溺\n乖乖安睡别惊醒')
   })
+  it('find 为空时加在草稿末尾，空草稿直接写入', () => {
+    const r: Review = { title: 't', suggestions: [{ id: 'o', tag: '结构', title: '', reason: '', edits: [{ find: '', replace: '【verse 1】\n相遇' }] }] }
+    expect(applyReview('', r, new Set(['o'])).text).toBe('【verse 1】\n相遇')
+    expect(applyReview('已有一行', r, new Set(['o'])).text).toBe('已有一行\n\n【verse 1】\n相遇')
+    expect(applyReview('已有一行', r, new Set()).status.o).toBe('ok')
+  })
   it('按行对比', () => {
     const rows = diffLines('a\nb\nc', 'a\nB\nc\nd')
     expect(rows.map((r) => r.kind)).toEqual(['same', 'removed', 'added', 'same', 'added'])

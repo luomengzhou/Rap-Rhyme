@@ -75,7 +75,8 @@ export function applyReview(text: string, review: Review, accepted: Set<string>,
   const status: Record<string, Status> = {}
   const planned: { span: Span; replace: string }[] = []
   for (const s of review.suggestions) {
-    const spans = s.edits.map((e) => locate(text, e.find))
+    // find 为空表示加在草稿末尾（草稿还没内容时用来写入提纲）
+    const spans = s.edits.map((e) => (e.find.trim() ? locate(text, e.find) : { start: text.length, end: text.length }))
     if (!s.edits.length || spans.some((x) => !x)) {
       status[s.id] = 'missing'
       continue
@@ -84,7 +85,8 @@ export function applyReview(text: string, review: Review, accepted: Set<string>,
     if (!accepted.has(s.id)) continue
     const mine = s.edits.map((e, i) => {
       const alt = i === 0 && s.options && choice[s.id] >= 0 ? s.options[choice[s.id]] : undefined
-      return { span: spans[i]!, replace: alt ?? e.replace }
+      const rep = alt ?? e.replace
+      return { span: spans[i]!, replace: e.find.trim() || !text.trim() ? rep : '\n\n' + rep.replace(/^\n+/, '') }
     })
     const clash = mine.some((m) => planned.some((p) => m.span.start < p.span.end && p.span.start < m.span.end))
     if (clash) {

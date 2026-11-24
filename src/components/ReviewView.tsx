@@ -1,10 +1,14 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { buildInput, errorText, getSample, splitReply, translatePrompt, type Material, type Sample, type Turn } from '../lib/ai'
 import { applyReview, diffLines, parseReview, type Review, type Status } from '../lib/review'
 
 export interface ReviewState {
   review: Review
   accepted: string[]
   choice: Record<string, number>
+  chat?: Turn[]
+  /** 收藏的素材 */
+  materials?: Material[]
 }
 
 interface Props {
@@ -13,11 +17,81 @@ interface Props {
   state: ReviewState | undefined
   setState: (s: ReviewState | undefined) => void
   onSaveAsNew: (text: string) => void
+  /** 草稿还是空的时候，直接把提纲写进去 */
+  onWrite: (text: string) => void
+  /** 给 Claude 的背景数据，如 BPM、小节数 */
+  facts: string
+  /** 从别的页面带过来、要自动发出的问题 */
+  ask: string
+  clearAsk: () => void
 }
 
 const STATUS_NOTE: Record<Exclude<Status, 'ok'>, string> = {
   missing: '原稿里找不到这一句，可能你已经改过了。',
-  conflict: '和前面已接受的建议改到了同一处，先拒绝那条才能用这条。',
+  conflict: '和前面已接受的建议改到了同一处，先撤回那条才能用这条。',
+}
+
+const STARTERS = [
+  '帮我把这份草稿分成 intro / verse / hook / outro',
+  '通读整首，说说你读到的主题和明线暗线',
+  '结构怎么调？哪几句适合抽出来做 hook',
+  '押韵上有哪些词可以换，给我几个选项',
+  '和这首手法像的歌有哪些，我去听听',
+  '这首长短合适吗？要不要加长',
+  '我想给这首配 beat，下一步怎么做',
+]
+
+/** 草稿还没什么内容时的开场 */
+const IDEA_STARTERS = [
+  '我有一个主题，先听我讲，再帮我理成几段',
+  '给我和这个主题有关的典故、神话、诗词',
+  '给我一些核心意象和可以展开的画面',
+  '流行歌里有哪些是这种情绪，我去听听',
+  '把我讲的分段思路写成提纲放进草稿',
+]
+
+const searchUrl = (m: Material) => 'https://www.bing.com/search?q=' + encodeURIComponent(`${m.title} ${m.source}`.trim())
+
+interface CardProps {
+  m: Material
+  saved: boolean
+  onToggle: () => void
+  onEdit?: () => void
+  onTranslate?: () => void
+  /** 正在翻译时已经写出来的部分 */
+  live?: string | null
+}
+
+function MaterialCard({ m, saved, onToggle, onEdit, onTranslate, live }: CardProps) {
+  const tr = live ?? m.translation ?? ''
+  const src = m.text.split('\n')
+  const dst = tr.split('\n')
+  // 行数对得上就一行原文一行译文地排，对不上就整段放在下面
+  const paired = tr && live == null && src.length === dst.length
+  return (
+    <article className={`mat${saved ? ' on' : ''}`}>
+      <div className="sug-head">
+        <span className="tag">{m.kind}</span>
+        <b>{m.title}</b>
+      </div>
+      {m.source && <div className="mat-src">{m.source}</div>}
+      {m.text && !paired && <p className="mat-text">{m.text}</p>}
+      {paired && (
+        <div className="mat-text mat-pair">
+          {src.map((l, i) => (l.trim() ? <div key={i}><span>{l}</span><em>{dst[i]}</em></div> : <br key={i} />))}
+        </div>
+      )}
+      {tr && !paired && <p className="mat-text mat-tr">{tr}</p>}
+      {live === '' && <p className="muted">正在翻译…</p>}
+      {m.use && <p>{m.use}</p>}
+      <div className="row tight">
+        <button className={saved ? 'primary' : ''} onClick={onToggle}>{saved ? (onEdit ? '取消收藏' : '已收藏') : '收藏'}</button>
+        {onEdit && <button className="link" onClick={onEdit}>改</button>}
+        {onTranslate && m.text.trim() && <button className="link" disabled={live != null} onClick={onTranslate}>{m.translation ? '重新翻译' : '翻译成中文'}</button>}
+        <a className="right" href={searchUrl(m)} target="_blank" rel="noreferrer">搜原文核对</a>
+      </div>
+    </article>
+  )
 }
 
 /** 找出一行里真正变了的那一段，其余部分保持原样 */
@@ -29,28 +103,141 @@ function inline(a: string, b: string): [string, string, string, string, string] 
   return [a.slice(0, p), a.slice(p, a.length - s), b.slice(p, b.length - s), a.slice(a.length - s), b.slice(0, p)]
 }
 
-export function ReviewView({ title, text, state, setState, onSaveAsNew }: Props) {
+export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite, facts, ask, clearAsk }: Props) {
+  const cur: ReviewState = state ?? { review: { title: `${title || '未命名'} · 改稿`, suggestions: [] }, accepted: [], choice: {}, chat: [] }
+  const { review, accepted, choice } = cur
+  const chat = cur.chat ?? []
+  const saved = cur.materials ?? []
+  const idea = text.split('\n').filter((l) => l.trim() && !/^\s*[[【（(]/.test(l)).length < 4
+  const matNotes = saved.length
+    ? '\n作者为这份草稿收藏的素材（可以直接引用、接着聊）：\n' + saved.slice(0, 20).map((m) => `- [${m.kind}] ${m.title}${m.source ? '（' + m.source + '）' : ''}：${m.text.slice(0, 600)}${m.use ? ' 用法：' + m.use : ''}`).join('\n')
+    : ''
+  const [matForm, setMatForm] = useState<Material | null>(null)
+  const saveMat = () => {
+    if (!matForm || !matForm.title.trim()) return
+    const prev = saved.find((x) => x.id === matForm.id)
+    const m = { ...matForm, title: matForm.title.trim(), translation: prev && prev.text !== matForm.text ? undefined : matForm.translation }
+    setState({ ...cur, materials: saved.some((x) => x.id === m.id) ? saved.map((x) => (x.id === m.id ? m : x)) : [m, ...saved] })
+    setMatForm(null)
+  }
+  const [trans, setTrans] = useState<{ id: string; text: string } | null>(null)
+  const translate = async (m: Material) => {
+    if (!sample || trans) return
+    setTrans({ id: m.id, text: '' })
+    setChatError('')
+    let out = ''
+    try {
+      const res = await sample(translatePrompt(m), { cache: false, onText: ({ text: t }) => setTrans({ id: m.id, text: t }) })
+      out = res.text.trim()
+    } catch (e) {
+      setChatError(errorText((e as { code?: string }).code))
+    }
+    setTrans(null)
+    if (!out) return
+    const now = latest.current
+    setState({ ...now, materials: (now.materials ?? []).map((x) => (x.id === m.id ? { ...x, translation: out } : x)) })
+  }
+  const toggleMat = (m: Material) =>
+    setState({ ...cur, materials: saved.some((x) => x.title === m.title) ? saved.filter((x) => x.title !== m.title) : [...saved, { ...m, id: 'm' + Math.random().toString(36).slice(2, 10) }] })
+
+  const [tab, setTab] = useState<'chat' | 'list' | 'mats'>('chat')
   const [error, setError] = useState('')
   const [pasting, setPasting] = useState(false)
   const [raw, setRaw] = useState('')
+  const [sample, setSample] = useState<Sample | null | undefined>(undefined)
+  const [draftMsg, setDraftMsg] = useState('')
+  const [streaming, setStreaming] = useState<string | null>(null)
+  const [chatError, setChatError] = useState('')
+  const [confirmClear, setConfirmClear] = useState(false)
   const file = useRef<HTMLInputElement>(null)
+  const ctl = useRef<AbortController | null>(null)
+  const log = useRef<HTMLDivElement>(null)
+  const latest = useRef(cur)
+  useEffect(() => {
+    latest.current = cur
+  })
+
+  useEffect(() => {
+    let alive = true
+    void getSample().then((s) => alive && setSample(() => s))
+    return () => {
+      alive = false
+      ctl.current?.abort()
+    }
+  }, [])
+  useEffect(() => {
+    log.current?.scrollTo({ top: log.current.scrollHeight })
+  }, [chat.length, streaming])
 
   const load = (json: string) => {
     try {
-      setState({ review: parseReview(json), accepted: [], choice: {} })
+      const r = parseReview(json)
+      setState({ ...cur, review: r, accepted: [], choice: {} })
       setError('')
       setPasting(false)
       setRaw('')
+      setTab('list')
     } catch (e) {
       setError(e instanceof Error ? e.message : '导入失败。')
     }
   }
 
-  const applied = useMemo(
-    () => (state ? applyReview(text, state.review, new Set(state.accepted), state.choice) : null),
-    [text, state],
-  )
-  const rows = useMemo(() => (applied ? diffLines(text, applied.text) : []), [text, applied])
+  const send = async (message: string) => {
+    const content = message.trim()
+    if (!content || !sample || streaming !== null) return
+    const turns: Turn[] = [...chat, { role: 'user', content }]
+    setState({ ...cur, chat: turns })
+    setDraftMsg('')
+    setChatError('')
+    setStreaming('')
+    ctl.current = new AbortController()
+    let answer = ''
+    try {
+      const res = await sample(buildInput(title, text, turns, facts + matNotes), {
+        cache: false,
+        signal: ctl.current.signal,
+        onText: ({ text: t }) => setStreaming(splitReply(t).text),
+      })
+      answer = res.text
+    } catch (e) {
+      const err = e as { code?: string; text?: string }
+      answer = err.text ?? ''
+      if (err.code !== 'cancelled') setChatError(errorText(err.code))
+    }
+    setStreaming(null)
+    if (!answer.trim()) return
+    const now = latest.current
+    const { suggestions } = splitReply(answer, Date.now().toString(36))
+    setState({
+      ...now,
+      chat: [...(now.chat ?? turns), { role: 'assistant', content: answer }],
+      review: { ...now.review, suggestions: [...now.review.suggestions, ...suggestions] },
+    })
+  }
+
+  // 从“结构”页带过来的问题，等 Claude 连上后自动发出
+  useEffect(() => {
+    if (!ask || sample === undefined) return
+    clearAsk()
+    if (sample) void send(ask)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask, sample])
+
+  const applied = useMemo(() => applyReview(text, review, new Set(accepted), choice), [text, review, accepted, choice])
+  const rows = useMemo(() => diffLines(text, applied.text), [text, applied])
+  const usable = review.suggestions.filter((s) => applied.status[s.id] !== 'missing')
+  const changed = applied.text !== text
+
+  const toggle = (id: string) => setState({ ...cur, accepted: accepted.includes(id) ? accepted.filter((x) => x !== id) : [...accepted, id] })
+  const remove = (id: string) =>
+    setState({ ...cur, review: { ...review, suggestions: review.suggestions.filter((s) => s.id !== id) }, accepted: accepted.filter((x) => x !== id) })
+  const jump = (find: string) => {
+    const key = find.replace(/[\s*]/g, '').slice(0, 6)
+    const el = [...document.querySelectorAll<HTMLElement>('.diff-row')].find((r) => r.dataset.key?.includes(key))
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    el?.classList.add('flash')
+    setTimeout(() => el?.classList.remove('flash'), 1200)
+  }
 
   const importer = (
     <div className="review-import">
@@ -59,6 +246,7 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew }: Props)
         <button onClick={() => setPasting(!pasting)}>粘贴建议</button>
         <input
           ref={file}
+          id="review-file"
           type="file"
           accept=".json,application/json"
           hidden
@@ -71,7 +259,7 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew }: Props)
       </div>
       {pasting && (
         <>
-          <textarea value={raw} onChange={(e) => setRaw(e.target.value)} rows={8} placeholder="把建议文件的内容粘贴到这里" />
+          <textarea id="review-paste" value={raw} onChange={(e) => setRaw(e.target.value)} rows={6} placeholder="把建议文件的内容粘贴到这里" />
           <div className="row">
             <button disabled={!raw.trim()} onClick={() => load(raw)}>导入</button>
           </div>
@@ -81,37 +269,6 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew }: Props)
     </div>
   )
 
-  if (!state || !applied) {
-    return (
-      <main className="single">
-        <div className="review-empty">
-          <h2>改稿</h2>
-          <p className="muted">
-            这里像看代码改动一样看改词建议：左边是你的原稿，右边是改后的样子，每条建议都可以单独接受或拒绝。
-            原稿不会被动，满意了再把改后的版本存成一份新草稿。
-          </p>
-          <p className="muted">
-            现在的建议来自对话：把词发给 Claude，它会给你一份建议文件，在这里导入「{title || '未命名'}」这份草稿对应的那份就行。
-          </p>
-          {importer}
-        </div>
-      </main>
-    )
-  }
-
-  const { review, accepted, choice } = state
-  const usable = review.suggestions.filter((s) => applied.status[s.id] !== 'missing')
-  const toggle = (id: string) =>
-    setState({ ...state, accepted: accepted.includes(id) ? accepted.filter((x) => x !== id) : [...accepted, id] })
-  const jump = (find: string) => {
-    const key = find.replace(/[\s*]/g, '').slice(0, 6)
-    const el = [...document.querySelectorAll<HTMLElement>('.diff-row')].find((r) => r.dataset.key?.includes(key))
-    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-    el?.classList.add('flash')
-    setTimeout(() => el?.classList.remove('flash'), 1200)
-  }
-  const changed = applied.text !== text
-
   return (
     <main className="review">
       <section className="diff">
@@ -119,10 +276,15 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew }: Props)
           <div>原稿<small>不会被改动</small></div>
           <div>
             改后<small>已接受 {accepted.filter((id) => applied.status[id] === 'ok').length} / {usable.length} 条</small>
-            <button className="primary" disabled={!changed} onClick={() => onSaveAsNew(applied.text)}>存为新草稿</button>
+            {text.trim() ? (
+              <button className="primary" disabled={!changed} onClick={() => onSaveAsNew(applied.text)}>存为新草稿</button>
+            ) : (
+              <button className="primary" disabled={!changed} onClick={() => { onWrite(applied.text); setState({ ...cur, accepted: [] }) }}>写进这份草稿</button>
+            )}
           </div>
         </div>
         <div className="diff-body">
+          {!text.trim() && !changed && <p className="muted diff-empty">这份草稿还是空的。可以先在右边和 Claude 聊主题，让它把提纲写进来；也可以去“写词”里直接写。</p>}
           {rows.map((r, i) => {
             const left = r.left?.replace(/\*/g, '') ?? null
             const right = r.right?.replace(/\*/g, '') ?? null
@@ -130,12 +292,8 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew }: Props)
             const header = /^\s*[[【]/.test(r.left ?? r.right ?? '')
             return (
               <div key={i} className={`diff-row ${r.kind}${header ? ' header' : ''}`} data-key={(r.left ?? '').replace(/[\s*]/g, '')}>
-                <div className="dcell old">
-                  {parts ? <>{parts[0]}<del>{parts[1]}</del>{parts[3]}</> : left}
-                </div>
-                <div className="dcell new">
-                  {parts ? <>{parts[4]}<ins>{parts[2]}</ins>{parts[3]}</> : right}
-                </div>
+                <div className="dcell old">{parts ? <>{parts[0]}<del>{parts[1]}</del>{parts[3]}</> : left}</div>
+                <div className="dcell new">{parts ? <>{parts[4]}<ins>{parts[2]}</ins>{parts[3]}</> : right}</div>
               </div>
             )
           })}
@@ -143,65 +301,187 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew }: Props)
       </section>
 
       <aside>
-        <div className="pane">
-          <h2>{review.title}</h2>
-          {review.summary && <p className="review-summary">{review.summary}</p>}
-
-          <h3>
-            建议（{review.suggestions.length}）
-            <span className="right row tight">
-              <button className="link" onClick={() => setState({ ...state, accepted: usable.map((s) => s.id) })}>全部接受</button>
-              <button className="link" onClick={() => setState({ ...state, accepted: [] })}>全部拒绝</button>
-            </span>
-          </h3>
-          {review.suggestions.map((s) => {
-            const st = applied.status[s.id]
-            const on = accepted.includes(s.id)
-            const pick = choice[s.id] ?? -1
-            const first = s.edits[0]
-            return (
-              <article key={s.id} className={`sug ${on && st === 'ok' ? 'on' : ''} ${st !== 'ok' ? 'off' : ''}`}>
-                <div className="sug-head">
-                  <span className="tag">{s.tag}</span>
-                  <button className="link sug-title" onClick={() => first && jump(first.find)}>{s.title}</button>
-                </div>
-                {s.reason && <p>{s.reason}</p>}
-                {s.options && s.options.length > 0 && first && (
-                  <div className="opts">
-                    {[first.replace, ...s.options].map((o, i) => (
-                      <button
-                        key={i}
-                        className={pick === i - 1 ? 'on' : ''}
-                        onClick={() => setState({ ...state, choice: { ...choice, [s.id]: i - 1 }, accepted: on ? accepted : [...accepted, s.id] })}
-                      >
-                        {o.replace(/\*/g, '') || '（删掉）'}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {st !== 'ok' && <p className="review-error">{STATUS_NOTE[st]}</p>}
-                <div className="row tight">
-                  <button className={on ? 'primary' : ''} disabled={st === 'missing'} onClick={() => toggle(s.id)}>
-                    {on ? '已接受，点击撤回' : '接受'}
-                  </button>
-                </div>
-              </article>
-            )
-          })}
-
-          {review.notes?.map((n) => (
-            <div key={n.title}>
-              <h3>{n.title}</h3>
-              <p className="review-note">{n.body}</p>
-            </div>
-          ))}
-
-          <h3>换一份建议</h3>
-          {importer}
-          <div className="row">
-            <button onClick={() => window.confirm('清除这份建议？原稿和已存的草稿不受影响。') && setState(undefined)}>清除这份建议</button>
-          </div>
+        <div className="tabs">
+          <button className={tab === 'chat' ? 'on' : ''} onClick={() => setTab('chat')}>和 Claude 聊</button>
+          <button className={tab === 'list' ? 'on' : ''} onClick={() => setTab('list')}>建议（{review.suggestions.length}）</button>
+          <button className={tab === 'mats' ? 'on' : ''} onClick={() => setTab('mats')}>素材（{saved.length}）</button>
         </div>
+
+        {tab === 'chat' && (
+          <div className="chat">
+            <div className="chat-log" ref={log}>
+              {chat.length === 0 && streaming === null && (
+                <div className="chat-intro">
+                  <p className="muted">
+                    {sample === null
+                      ? <>这个网址上没有接 Claude。从 <a href="https://claude.ai/artifact/BiNJshjbS8uoLRfLpNZSzm" target="_blank" rel="noreferrer">claude.ai 上的这份网站</a> 打开，就能在这里直接对话。</>
+                      : idea
+                        ? '这份草稿还在构思阶段。把你想写的主题、感觉、看过的书讲给 Claude 听，它会帮你理成几段，并给典故、意象这类素材，喜欢的可以收藏。'
+                        : 'Claude 能看到左边这份草稿。问它什么都行，它给的改动会变成“建议”，在左边分屏里看改前改后，原稿不动。'}
+                  </p>
+                  {sample && idea && IDEA_STARTERS.map((s) => (
+                    <button key={s} className="starter" onClick={() => { setDraftMsg(s.includes('先听我讲') ? '我想写的主题是：' : s); document.getElementById('chat-input')?.focus() }}>{s}</button>
+                  ))}
+                  {sample && !idea && STARTERS.map((s) => (
+                    <button key={s} className="starter" onClick={() => void send(s)}>{s}</button>
+                  ))}
+                </div>
+              )}
+              {chat.map((t, i) => {
+                const parsed = t.role === 'assistant' ? splitReply(t.content) : null
+                return (
+                  <div key={i} className={`bubble ${t.role}`}>
+                    {parsed ? parsed.text : t.content}
+                    {parsed && parsed.materials.length > 0 && (
+                      <div className="mats">
+                        {parsed.materials.map((m, k) => (
+                          <MaterialCard key={k} m={m} saved={saved.some((x) => x.title === m.title)} onToggle={() => toggleMat(m)} />
+                        ))}
+                      </div>
+                    )}
+                    {parsed && parsed.suggestions.length > 0 && (
+                      <button className="link bubble-more" onClick={() => setTab('list')}>给了 {parsed.suggestions.length} 条改动，去看看</button>
+                    )}
+                  </div>
+                )
+              })}
+              {streaming !== null && <div className="bubble assistant">{streaming || '正在想…'}</div>}
+              {chatError && <p className="review-error">{chatError}</p>}
+            </div>
+            <form
+              className="chat-form"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void send(draftMsg)
+              }}
+            >
+              <textarea
+                id="chat-input"
+                value={draftMsg}
+                onChange={(e) => setDraftMsg(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault()
+                    void send(draftMsg)
+                  }
+                }}
+                rows={3}
+                disabled={!sample}
+                placeholder={sample ? '比如：这首我想讲的是……你觉得 verse 2 哪里拖了？' : sample === null ? '这里没有接 Claude' : '正在连接 Claude…'}
+              />
+              <div className="row tight">
+                {streaming !== null ? (
+                  <button type="button" onClick={() => ctl.current?.abort()}>停</button>
+                ) : (
+                  <button type="submit" className="primary" disabled={!sample || !draftMsg.trim()}>发送</button>
+                )}
+                {chat.length > 0 && streaming === null && (
+                  confirmClear ? (
+                    <>
+                      <button type="button" onClick={() => { setState({ ...cur, chat: [] }); setConfirmClear(false) }}>确定清空</button>
+                      <button type="button" className="link" onClick={() => setConfirmClear(false)}>取消</button>
+                    </>
+                  ) : (
+                    <button type="button" className="link right" onClick={() => setConfirmClear(true)}>清空对话</button>
+                  )
+                )}
+              </div>
+            </form>
+          </div>
+        )}
+
+        {tab === 'mats' && (
+          <div className="pane">
+            <p className="muted">这份草稿收藏的典故、诗词、意象和参考歌曲。内容是 Claude 凭记忆给的，用之前点“搜原文核对”确认一下。</p>
+            {matForm ? (
+              <form className="mat-form" onSubmit={(e) => { e.preventDefault(); saveMat() }}>
+                <div className="row tight">
+                  <select id="mat-kind" value={matForm.kind} onChange={(e) => setMatForm({ ...matForm, kind: e.target.value })}>
+                    {['歌曲', '歌词', '诗词', '典故', '神话', '寓言', '文学', '意象', '说法', '其他'].map((k) => <option key={k}>{k}</option>)}
+                  </select>
+                  <input id="mat-title" value={matForm.title} onChange={(e) => setMatForm({ ...matForm, title: e.target.value })} placeholder="名字，比如歌名" />
+                </div>
+                <input id="mat-source" value={matForm.source} onChange={(e) => setMatForm({ ...matForm, source: e.target.value })} placeholder="出处：歌手、作者、作品" />
+                <textarea id="mat-text" rows={6} value={matForm.text} onChange={(e) => setMatForm({ ...matForm, text: e.target.value })} placeholder="原文、歌词片段，或你自己的记录" />
+                <input id="mat-use" value={matForm.use} onChange={(e) => setMatForm({ ...matForm, use: e.target.value })} placeholder="想怎么用（可不填）" />
+                <div className="row tight">
+                  <button type="submit" className="primary" disabled={!matForm.title.trim()}>保存</button>
+                  <button type="button" onClick={() => setMatForm(null)}>取消</button>
+                </div>
+              </form>
+            ) : (
+              <div className="row">
+                <button onClick={() => setMatForm({ id: 'm' + Math.random().toString(36).slice(2, 10), kind: '歌词', title: '', source: '', text: '', use: '' })}>自己加一条</button>
+              </div>
+            )}
+            {saved.length === 0 && !matForm && <p className="muted">还没有收藏。可以和 Claude 聊主题让它给素材，也可以把自己查到的原文、歌词加进来。</p>}
+            <div className="mats">
+              {saved.map((m) => <MaterialCard key={m.id} m={m} saved onToggle={() => toggleMat(m)} onEdit={() => setMatForm(m)} onTranslate={sample ? () => void translate(m) : undefined} live={trans?.id === m.id ? trans.text : null} />)}
+              {chatError && <p className="review-error">{chatError}</p>}
+            </div>
+          </div>
+        )}
+
+        {tab === 'list' && (
+          <div className="pane">
+            {review.summary && <p className="review-summary">{review.summary}</p>}
+            <h3>
+              建议（{review.suggestions.length}）
+              {review.suggestions.length > 0 && (
+                <span className="right row tight">
+                  <button className="link" onClick={() => setState({ ...cur, accepted: usable.map((s) => s.id) })}>全部接受</button>
+                  <button className="link" onClick={() => setState({ ...cur, accepted: [] })}>全部撤回</button>
+                </span>
+              )}
+            </h3>
+            {review.suggestions.length === 0 && <p className="muted">还没有建议。去和 Claude 聊聊这首词，它给的改动会出现在这里。</p>}
+            {review.suggestions.map((s) => {
+              const st = applied.status[s.id]
+              const on = accepted.includes(s.id)
+              const pick = choice[s.id] ?? -1
+              const first = s.edits[0]
+              return (
+                <article key={s.id} className={`sug ${on && st === 'ok' ? 'on' : ''} ${st !== 'ok' ? 'off' : ''}`}>
+                  <div className="sug-head">
+                    <span className="tag">{s.tag}</span>
+                    <button className="link sug-title" onClick={() => first && jump(first.find)}>{s.title}</button>
+                  </div>
+                  {s.reason && <p>{s.reason}</p>}
+                  {s.options && s.options.length > 0 && first && (
+                    <div className="opts">
+                      {[first.replace, ...s.options].map((o, i) => (
+                        <button
+                          key={i}
+                          className={pick === i - 1 ? 'on' : ''}
+                          onClick={() => setState({ ...cur, choice: { ...choice, [s.id]: i - 1 }, accepted: on ? accepted : [...accepted, s.id] })}
+                        >
+                          {o.replace(/\*/g, '') || '（删掉）'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {st !== 'ok' && <p className="review-error">{STATUS_NOTE[st]}</p>}
+                  <div className="row tight">
+                    <button className={on ? 'primary' : ''} disabled={st === 'missing'} onClick={() => toggle(s.id)}>
+                      {on ? '已接受，点击撤回' : '接受'}
+                    </button>
+                    <button className="link right" onClick={() => remove(s.id)}>不要这条</button>
+                  </div>
+                </article>
+              )
+            })}
+
+            {review.notes?.map((n) => (
+              <div key={n.title}>
+                <h3>{n.title}</h3>
+                <p className="review-note">{n.body}</p>
+              </div>
+            ))}
+
+            <h3>导入建议文件</h3>
+            {importer}
+          </div>
+        )}
       </aside>
     </main>
   )
