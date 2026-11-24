@@ -10,6 +10,7 @@ import { Editor } from './components/Editor'
 import { FlowView } from './components/FlowView'
 import { RhymePanel } from './components/RhymePanel'
 import { StructurePanel } from './components/StructurePanel'
+import { ReviewView, type ReviewState } from './components/ReviewView'
 import { TheoryView } from './components/TheoryView'
 
 interface Draft {
@@ -18,7 +19,7 @@ interface Draft {
   text: string
 }
 
-type View = 'write' | 'flow' | 'theory'
+type View = 'write' | 'review' | 'flow' | 'theory'
 type Side = 'check' | 'rhyme' | 'structure'
 
 const newDraft = (title = '新草稿'): Draft => ({ id: Math.random().toString(36).slice(2, 10), title, text: '' })
@@ -36,6 +37,7 @@ export default function App() {
   const [blocked, setBlocked] = useStored<string[]>('rr.blocked', [])
   const [liked, setLiked] = useStored<string[]>('rr.liked', [])
   const [template, setTemplate] = useStored<SectionTpl[]>('rr.template', REGULAR_TEMPLATE)
+  const [reviews, setReviews] = useStored<Record<string, ReviewState>>('rr.reviews', {})
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState<RhymeIndex | null>(null)
   const [playing, setPlaying] = useState(false)
@@ -123,10 +125,11 @@ export default function App() {
         <h1>Rap Rhyme<small>写词工作台</small></h1>
         <nav>
           <button className={view === 'write' ? 'on' : ''} onClick={() => setView('write')}>写词</button>
+          <button className={view === 'review' ? 'on' : ''} onClick={() => setView('review')}>改稿</button>
           <button className={view === 'flow' ? 'on' : ''} onClick={() => setView('flow')}>打拍</button>
           <button className={view === 'theory' ? 'on' : ''} onClick={() => setView('theory')}>乐理卡</button>
         </nav>
-        {view === 'write' && (
+        {(view === 'write' || view === 'review') && (
           <div className="drafts">
             <select value={draft.id} onChange={(e) => setActiveId(e.target.value)}>
               {drafts.map((d) => (
@@ -187,6 +190,26 @@ export default function App() {
             </div>
           </aside>
         </main>
+      )}
+      {view === 'review' && (
+        <ReviewView
+          key={draft.id}
+          title={draft.title}
+          text={draft.text}
+          state={reviews[draft.id]}
+          setState={(s) => {
+            const next = { ...reviews }
+            if (s) next[draft.id] = s
+            else delete next[draft.id]
+            setReviews(next)
+          }}
+          onSaveAsNew={(text) => {
+            const d = { ...newDraft(`${draft.title || '未命名'}（改后）`), text }
+            setDrafts([...drafts, d])
+            setActiveId(d.id)
+            setView('write')
+          }}
+        />
       )}
       {view === 'flow' && (
         <main className="single">
