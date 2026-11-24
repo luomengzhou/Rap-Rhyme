@@ -93,9 +93,11 @@ export function analyze(text: string, opt: AnalyzeOptions): Analysis {
 
   raw.forEach((t, line) => {
     const hm = HEADER.exec(t)
+    // 整行都在圆括号里的是提纲提示，不算歌词
+    const note = /^\s*[（(][^）)]*[）)]\s*$/.test(t)
     const chars = [...t]
     const row: Pos[] = []
-    if (!hm) {
+    if (!hm && !note) {
       const syls = toSyls(t)
       let k = 0
       let col = 0
@@ -123,7 +125,7 @@ export function analyze(text: string, opt: AnalyzeOptions): Analysis {
       text: t,
       header: hm ? hm[1].trim() : null,
       marks: new Array(t.length).fill(-1),
-      count: hm ? 0 : row.length + latinSyllables(t),
+      count: hm || note ? 0 : row.length + latinSyllables(t),
       density: 0,
     })
   })

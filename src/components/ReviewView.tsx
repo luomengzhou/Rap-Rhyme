@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildInput, errorText, getSample, splitReply, type Sample, type Turn } from '../lib/ai'
+import { buildInput, errorText, getSample, splitReply, type Material, type Sample, type Turn } from '../lib/ai'
 import { applyReview, diffLines, parseReview, type Review, type Status } from '../lib/review'
 
 export interface ReviewState {
@@ -7,6 +7,8 @@ export interface ReviewState {
   accepted: string[]
   choice: Record<string, number>
   chat?: Turn[]
+  /** 收藏的素材 */
+  materials?: Material[]
 }
 
 interface Props {
@@ -15,6 +17,8 @@ interface Props {
   state: ReviewState | undefined
   setState: (s: ReviewState | undefined) => void
   onSaveAsNew: (text: string) => void
+  /** 草稿还是空的时候，直接把提纲写进去 */
+  onWrite: (text: string) => void
   /** 给 Claude 的背景数据，如 BPM、小节数 */
   facts: string
   /** 从别的页面带过来、要自动发出的问题 */
@@ -37,6 +41,35 @@ const STARTERS = [
   '我想给这首配 beat，下一步怎么做',
 ]
 
+/** 草稿还没什么内容时的开场 */
+const IDEA_STARTERS = [
+  '我有一个主题，先听我讲，再帮我理成几段',
+  '给我和这个主题有关的典故、神话、诗词',
+  '给我一些核心意象和可以展开的画面',
+  '流行歌里有哪些是这种情绪，我去听听',
+  '把我讲的分段思路写成提纲放进草稿',
+]
+
+const searchUrl = (m: Material) => 'https://www.bing.com/search?q=' + encodeURIComponent(`${m.title} ${m.source}`.trim())
+
+function MaterialCard({ m, saved, onToggle }: { m: Material; saved: boolean; onToggle: () => void }) {
+  return (
+    <article className={`mat${saved ? ' on' : ''}`}>
+      <div className="sug-head">
+        <span className="tag">{m.kind}</span>
+        <b>{m.title}</b>
+      </div>
+      {m.source && <div className="mat-src">{m.source}</div>}
+      {m.text && <p className="mat-text">{m.text}</p>}
+      {m.use && <p>{m.use}</p>}
+      <div className="row tight">
+        <button className={saved ? 'primary' : ''} onClick={onToggle}>{saved ? '已收藏' : '收藏'}</button>
+        <a className="right" href={searchUrl(m)} target="_blank" rel="noreferrer">搜原文核对</a>
+      </div>
+    </article>
+  )
+}
+
 /** 找出一行里真正变了的那一段，其余部分保持原样 */
 function inline(a: string, b: string): [string, string, string, string, string] {
   let p = 0
@@ -46,12 +79,16 @@ function inline(a: string, b: string): [string, string, string, string, string] 
   return [a.slice(0, p), a.slice(p, a.length - s), b.slice(p, b.length - s), a.slice(a.length - s), b.slice(0, p)]
 }
 
-export function ReviewView({ title, text, state, setState, onSaveAsNew, facts, ask, clearAsk }: Props) {
+export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite, facts, ask, clearAsk }: Props) {
   const cur: ReviewState = state ?? { review: { title: `${title || '未命名'} · 改稿`, suggestions: [] }, accepted: [], choice: {}, chat: [] }
   const { review, accepted, choice } = cur
   const chat = cur.chat ?? []
+  const saved = cur.materials ?? []
+  const idea = text.split('\n').filter((l) => l.trim() && !/^\s*[[【（(]/.test(l)).length < 4
+  const toggleMat = (m: Material) =>
+    setState({ ...cur, materials: saved.some((x) => x.title === m.title) ? saved.filter((x) => x.title !== m.title) : [...saved, m] })
 
-  const [tab, setTab] = useState<'chat' | 'list'>('chat')
+  const [tab, setTab] = useState<'chat' | 'list' | 'mats'>('chat')
   const [error, setError] = useState('')
   const [pasting, setPasting] = useState(false)
   const [raw, setRaw] = useState('')
@@ -187,11 +224,15 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, facts, a
           <div>原稿<small>不会被改动</small></div>
           <div>
             改后<small>已接受 {accepted.filter((id) => applied.status[id] === 'ok').length} / {usable.length} 条</small>
-            <button className="primary" disabled={!changed} onClick={() => onSaveAsNew(applied.text)}>存为新草稿</button>
+            {text.trim() ? (
+              <button className="primary" disabled={!changed} onClick={() => onSaveAsNew(applied.text)}>存为新草稿</button>
+            ) : (
+              <button className="primary" disabled={!changed} onClick={() => { onWrite(applied.text); setState({ ...cur, accepted: [] }) }}>写进这份草稿</button>
+            )}
           </div>
         </div>
         <div className="diff-body">
-          {!text.trim() && <p className="muted diff-empty">这份草稿还是空的。先去“写词”里写几句，再回来让 Claude 看。</p>}
+          {!text.trim() && !changed && <p className="muted diff-empty">这份草稿还是空的。可以先在右边和 Claude 聊主题，让它把提纲写进来；也可以去“写词”里直接写。</p>}
           {rows.map((r, i) => {
             const left = r.left?.replace(/\*/g, '') ?? null
             const right = r.right?.replace(/\*/g, '') ?? null
@@ -211,6 +252,7 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, facts, a
         <div className="tabs">
           <button className={tab === 'chat' ? 'on' : ''} onClick={() => setTab('chat')}>和 Claude 聊</button>
           <button className={tab === 'list' ? 'on' : ''} onClick={() => setTab('list')}>建议（{review.suggestions.length}）</button>
+          <button className={tab === 'mats' ? 'on' : ''} onClick={() => setTab('mats')}>素材（{saved.length}）</button>
         </div>
 
         {tab === 'chat' && (
@@ -221,10 +263,15 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, facts, a
                   <p className="muted">
                     {sample === null
                       ? <>这个网址上没有接 Claude。从 <a href="https://claude.ai/artifact/BiNJshjbS8uoLRfLpNZSzm" target="_blank" rel="noreferrer">claude.ai 上的这份网站</a> 打开，就能在这里直接对话。</>
-                      : 'Claude 能看到左边这份草稿。问它什么都行，它给的改动会变成“建议”，在左边分屏里看改前改后，原稿不动。'}
+                      : idea
+                        ? '这份草稿还在构思阶段。把你想写的主题、感觉、看过的书讲给 Claude 听，它会帮你理成几段，并给典故、意象这类素材，喜欢的可以收藏。'
+                        : 'Claude 能看到左边这份草稿。问它什么都行，它给的改动会变成“建议”，在左边分屏里看改前改后，原稿不动。'}
                   </p>
-                  {sample && STARTERS.map((s) => (
-                    <button key={s} className="starter" disabled={!text.trim()} onClick={() => void send(s)}>{s}</button>
+                  {sample && idea && IDEA_STARTERS.map((s) => (
+                    <button key={s} className="starter" onClick={() => { setDraftMsg(s.includes('先听我讲') ? '我想写的主题是：' : s); document.getElementById('chat-input')?.focus() }}>{s}</button>
+                  ))}
+                  {sample && !idea && STARTERS.map((s) => (
+                    <button key={s} className="starter" onClick={() => void send(s)}>{s}</button>
                   ))}
                 </div>
               )}
@@ -233,6 +280,13 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, facts, a
                 return (
                   <div key={i} className={`bubble ${t.role}`}>
                     {parsed ? parsed.text : t.content}
+                    {parsed && parsed.materials.length > 0 && (
+                      <div className="mats">
+                        {parsed.materials.map((m) => (
+                          <MaterialCard key={m.id} m={m} saved={saved.some((x) => x.title === m.title)} onToggle={() => toggleMat(m)} />
+                        ))}
+                      </div>
+                    )}
                     {parsed && parsed.suggestions.length > 0 && (
                       <button className="link bubble-more" onClick={() => setTab('list')}>给了 {parsed.suggestions.length} 条改动，去看看</button>
                     )}
@@ -281,6 +335,16 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, facts, a
                 )}
               </div>
             </form>
+          </div>
+        )}
+
+        {tab === 'mats' && (
+          <div className="pane">
+            <p className="muted">这份草稿收藏的典故、诗词、意象和参考歌曲。内容是 Claude 凭记忆给的，用之前点“搜原文核对”确认一下。</p>
+            {saved.length === 0 && <p className="muted">还没有收藏。去和 Claude 聊这首的主题，让它给素材。</p>}
+            <div className="mats">
+              {saved.map((m) => <MaterialCard key={m.id} m={m} saved onToggle={() => toggleMat(m)} />)}
+            </div>
           </div>
         )}
 

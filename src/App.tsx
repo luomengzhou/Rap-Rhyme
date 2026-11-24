@@ -226,6 +226,7 @@ export default function App() {
             else delete next[draft.id]
             setReviews(next)
           }}
+          onWrite={setText}
           onSaveAsNew={(text) => {
             const d = { ...newDraft(`${draft.title || '未命名'}（改后）`), text }
             setDrafts([...drafts, d])

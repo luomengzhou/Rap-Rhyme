@@ -1,6 +1,20 @@
 // 网站里的 Claude：只有从 claude.ai 上打开这个网站时才可用（用的是看的人自己的 Claude 账号，不需要 API key）。
 import type { Suggestion } from './review'
 
+/** Claude 给的一条素材：典故、诗词、神话、意象等 */
+export interface Material {
+  id: string
+  /** 典故 / 诗词 / 神话 / 寓言 / 文学 / 意象 / 说法 / 歌曲 */
+  kind: string
+  title: string
+  /** 出处：作品、作者 */
+  source: string
+  /** 原文或大意 */
+  text: string
+  /** 可以怎么用在这首词里 */
+  use: string
+}
+
 export interface Turn {
   role: 'user' | 'assistant'
   content: string
@@ -52,11 +66,20 @@ const RULES = `你是一个说唱写词搭档，在一个写词网站的“改�
 - 分段（划分 intro / verse / hook / bridge / outro）：只用一条建议，tag 用“结构”，每个要加的标题是一处 edit，find 是那一段的第一行原文，replace 是 "【标题】\n" 加上这行原文。草稿里已有的标题不要重复加。判断不了哪里是 hook 时直说，并建议哪几句适合抽出来。
 - 被问到长短：结合下面给的小节数和估算时长说实话。长短跟着内容走：长的叙事歌可以五六分钟，短的两分钟出头也很常见。说清楚如果加长可以加什么（再唱一遍 hook、补一段 verse、加 bridge），如果不加为什么也成立，让作者自己选。
 - 被问到配 beat 或下一步：按顺序给两三步具体能做的事，例如先定速度和气质（网站底部可以换 beat 和 BPM 跟着念）、去“打拍”页把最顺的一句敲出来、再去找一条 type beat 跟着念并录音、念不顺的行回来改。不要一次讲太多。
-- 一次最多给 6 条，挑最值得改的。正文里不用重复代码块的内容，简单说你给了哪几类建议就行。`
+- 一次最多给 6 条，挑最值得改的。
+
+构思（草稿还空着或只有几行，作者在讲主题时）：
+- 先听懂作者要的感觉，用两三句复述你理解的核心情绪和人物关系，不确定就问。不要评判题材，病态、扭曲、卑微的爱都是正当的文学主题；写情欲和臣服时走意象和心理，不写露骨的性描写。
+- 不替作者把词写完。你给的是材料：提纲、意象、典故、可以展开的画面、几个可选的说法。
+- 作者要典故、故事、诗词、神话、意象时，用素材卡片给出：在回答最后的 \`\`\`json 代码块里加 "materials":[{"kind":"典故","title":"名字","source":"出处：作品和作者","text":"原文或一两句大意","use":"可以怎么化用到这首词里"}]。kind 只用：典故、诗词、神话、寓言、文学、意象、说法、歌曲。一次 4 到 8 条，古今中外都可以，和主题的关系要具体。
+- 参考歌曲不限说唱，流行、K-pop、R&B、摇滚里情绪对得上的都可以给，用 kind“歌曲”：source 写歌手，text 用你自己的话写这首歌怎么处理这种情绪（视角、语气、转折），不要引用歌词原文，use 写可以借鉴的手法。作者提到的歌如果你不认识或拿不准，直说不认识，不要猜。
+- 素材必须真实存在。只有你确信的原句才当原文写，拿不准就写大意并注明“大意”。绝不编造出处，不给网址（网站会自动加搜索链接，作者自己核对）。
+- 作者讲了分段思路、想把提纲写进草稿时，用一条建议给出：tag 用“结构”，edits 里 find 留空字符串（表示加在草稿末尾），replace 是提纲，格式是每段一个【verse 1】这样的标题，标题下一行用圆括号写这一段的主题，例如“（相遇，她像神明一样攫走我全部心智）”，段与段之间空一行。圆括号里是提示，不是歌词。
+- suggestions 和 materials 可以放在同一个代码块里，也可以只有其中一个。正文里不用重复代码块的内容，简单说你给了哪几类建议就行。`
 
 /** 组装发给 Claude 的对话：规则和当前草稿放在最前面，后面是页面保存的对话 */
 export function buildInput(title: string, draft: string, turns: Turn[], facts = ''): Turn[] {
-  const head = `${RULES}\n\n草稿标题：${title || '未命名'}\n${facts ? facts + '\n' : ''}\n当前草稿（带 ** 的词是作者标出的想押的词）：\n<<<\n${draft.slice(0, 20000)}\n>>>`
+  const head = `${RULES}\n\n草稿标题：${title || '未命名'}\n${facts ? facts + '\n' : ''}\n当前草稿（带 ** 的词是作者标出的想押的词；圆括号里的行是提纲提示）：\n<<<\n${draft.trim() ? draft.slice(0, 20000) : '（还是空的，作者在构思阶段）'}\n>>>`
   // 只带最近的对话，免得越聊越长
   return [{ role: 'user', content: head }, ...turns.slice(-16)]
 }
@@ -64,19 +87,19 @@ export function buildInput(title: string, draft: string, turns: Turn[], facts = 
 const FENCE = /```json\s*([\s\S]*?)(```|$)/
 
 /** 把回答拆成给人看的文字和建议 */
-export function splitReply(raw: string): { text: string; suggestions: Suggestion[] } {
+export function splitReply(raw: string): { text: string; suggestions: Suggestion[]; materials: Material[] } {
   const m = FENCE.exec(raw)
   const text = (m ? raw.slice(0, m.index) + raw.slice(m.index + m[0].length) : raw).trim()
-  if (!m || !m[2]) return { text, suggestions: [] }
+  if (!m || !m[2]) return { text, suggestions: [], materials: [] }
   try {
-    const data = JSON.parse(m[1]) as { suggestions?: unknown }
+    const data = JSON.parse(m[1]) as { suggestions?: unknown; materials?: unknown }
     const list = Array.isArray(data.suggestions) ? data.suggestions : []
     const stamp = Date.now().toString(36)
     const suggestions: Suggestion[] = []
     list.forEach((x, i) => {
       const s = x as Partial<Suggestion>
       if (!s || typeof s.title !== 'string' || !Array.isArray(s.edits)) return
-      const edits = s.edits.filter((e) => e && typeof e.find === 'string' && typeof e.replace === 'string' && e.find.trim())
+      const edits = s.edits.filter((e) => e && typeof e.find === 'string' && typeof e.replace === 'string' && (e.find.trim() || e.replace.trim()))
       if (!edits.length) return
       suggestions.push({
         id: `ai-${stamp}-${i}`,
@@ -87,9 +110,16 @@ export function splitReply(raw: string): { text: string; suggestions: Suggestion
         options: Array.isArray(s.options) ? s.options.filter((o) => typeof o === 'string') : undefined,
       })
     })
-    return { text, suggestions }
+    const str = (v: unknown) => (typeof v === 'string' ? v : '')
+    const materials: Material[] = []
+    ;(Array.isArray(data.materials) ? data.materials : []).forEach((x, i) => {
+      const k = x as Record<string, unknown>
+      if (!k || !str(k.title)) return
+      materials.push({ id: `m-${stamp}-${i}`, kind: str(k.kind) || '素材', title: str(k.title), source: str(k.source), text: str(k.text), use: str(k.use) })
+    })
+    return { text, suggestions, materials }
   } catch {
-    return { text, suggestions: [] }
+    return { text, suggestions: [], materials: [] }
   }
 }
 
