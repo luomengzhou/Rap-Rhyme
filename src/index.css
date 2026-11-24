@@ -264,3 +264,7 @@ a { color: var(--accent); }
 .mat-form .row input { flex: 1; min-width: 0; }
 .mat-form textarea { line-height: 1.6; resize: vertical; }
 .mat-text { white-space: pre-wrap; }
+.mat-pair > div { margin: 0 0 8px; }
+.mat-pair span { display: block; color: var(--dim); font-size: 13px; }
+.mat-pair em { display: block; font-style: normal; color: var(--ink); }
+.mat-tr { border-left-color: var(--accent); }

@@ -13,6 +13,8 @@ export interface Material {
   text: string
   /** 可以怎么用在这首词里 */
   use: string
+  /** 中文翻译，一行对一行 */
+  translation?: string
 }
 
 export interface Turn {
@@ -141,3 +143,7 @@ export function errorText(code: string | undefined): string {
       return '没连上 Claude，再发一次试试。'
   }
 }
+
+/** 让 Claude 把一段外语原文逐行译成中文 */
+export const translatePrompt = (m: Material) =>
+  `把下面这段${m.kind === '歌词' || m.kind === '歌曲' ? '歌词' : '文字'}翻译成中文，给一个正在学写词的人看懂原意用。\n要求：一行原文对应一行译文，行数和原文完全一致，空行照样保留；只输出译文，不要原文、标题和解释；语气自然，保留意象和口吻，不要为了押韵改意思；有双关或文化梗的地方，在那一行末尾用圆括号简短注明。已经是中文的行原样保留。\n\n出处：${m.title}${m.source ? ' / ' + m.source : ''}\n原文：\n<<<\n${m.text.slice(0, 12000)}\n>>>`

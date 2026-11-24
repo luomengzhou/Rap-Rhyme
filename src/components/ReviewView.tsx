@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildInput, errorText, getSample, splitReply, type Material, type Sample, type Turn } from '../lib/ai'
+import { buildInput, errorText, getSample, splitReply, translatePrompt, type Material, type Sample, type Turn } from '../lib/ai'
 import { applyReview, diffLines, parseReview, type Review, type Status } from '../lib/review'
 
 export interface ReviewState {
@@ -52,7 +52,22 @@ const IDEA_STARTERS = [
 
 const searchUrl = (m: Material) => 'https://www.bing.com/search?q=' + encodeURIComponent(`${m.title} ${m.source}`.trim())
 
-function MaterialCard({ m, saved, onToggle, onEdit }: { m: Material; saved: boolean; onToggle: () => void; onEdit?: () => void }) {
+interface CardProps {
+  m: Material
+  saved: boolean
+  onToggle: () => void
+  onEdit?: () => void
+  onTranslate?: () => void
+  /** 正在翻译时已经写出来的部分 */
+  live?: string | null
+}
+
+function MaterialCard({ m, saved, onToggle, onEdit, onTranslate, live }: CardProps) {
+  const tr = live ?? m.translation ?? ''
+  const src = m.text.split('\n')
+  const dst = tr.split('\n')
+  // 行数对得上就一行原文一行译文地排，对不上就整段放在下面
+  const paired = tr && live == null && src.length === dst.length
   return (
     <article className={`mat${saved ? ' on' : ''}`}>
       <div className="sug-head">
@@ -60,11 +75,19 @@ function MaterialCard({ m, saved, onToggle, onEdit }: { m: Material; saved: bool
         <b>{m.title}</b>
       </div>
       {m.source && <div className="mat-src">{m.source}</div>}
-      {m.text && <p className="mat-text">{m.text}</p>}
+      {m.text && !paired && <p className="mat-text">{m.text}</p>}
+      {paired && (
+        <div className="mat-text mat-pair">
+          {src.map((l, i) => (l.trim() ? <div key={i}><span>{l}</span><em>{dst[i]}</em></div> : <br key={i} />))}
+        </div>
+      )}
+      {tr && !paired && <p className="mat-text mat-tr">{tr}</p>}
+      {live === '' && <p className="muted">正在翻译…</p>}
       {m.use && <p>{m.use}</p>}
       <div className="row tight">
         <button className={saved ? 'primary' : ''} onClick={onToggle}>{saved ? (onEdit ? '取消收藏' : '已收藏') : '收藏'}</button>
         {onEdit && <button className="link" onClick={onEdit}>改</button>}
+        {onTranslate && m.text.trim() && <button className="link" disabled={live != null} onClick={onTranslate}>{m.translation ? '重新翻译' : '翻译成中文'}</button>}
         <a className="right" href={searchUrl(m)} target="_blank" rel="noreferrer">搜原文核对</a>
       </div>
     </article>
@@ -92,9 +115,27 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
   const [matForm, setMatForm] = useState<Material | null>(null)
   const saveMat = () => {
     if (!matForm || !matForm.title.trim()) return
-    const m = { ...matForm, title: matForm.title.trim() }
+    const prev = saved.find((x) => x.id === matForm.id)
+    const m = { ...matForm, title: matForm.title.trim(), translation: prev && prev.text !== matForm.text ? undefined : matForm.translation }
     setState({ ...cur, materials: saved.some((x) => x.id === m.id) ? saved.map((x) => (x.id === m.id ? m : x)) : [m, ...saved] })
     setMatForm(null)
+  }
+  const [trans, setTrans] = useState<{ id: string; text: string } | null>(null)
+  const translate = async (m: Material) => {
+    if (!sample || trans) return
+    setTrans({ id: m.id, text: '' })
+    setChatError('')
+    let out = ''
+    try {
+      const res = await sample(translatePrompt(m), { cache: false, onText: ({ text: t }) => setTrans({ id: m.id, text: t }) })
+      out = res.text.trim()
+    } catch (e) {
+      setChatError(errorText((e as { code?: string }).code))
+    }
+    setTrans(null)
+    if (!out) return
+    const now = latest.current
+    setState({ ...now, materials: (now.materials ?? []).map((x) => (x.id === m.id ? { ...x, translation: out } : x)) })
   }
   const toggleMat = (m: Material) =>
     setState({ ...cur, materials: saved.some((x) => x.title === m.title) ? saved.filter((x) => x.title !== m.title) : [...saved, { ...m, id: 'm' + Math.random().toString(36).slice(2, 10) }] })
@@ -375,7 +416,8 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
             )}
             {saved.length === 0 && !matForm && <p className="muted">还没有收藏。可以和 Claude 聊主题让它给素材，也可以把自己查到的原文、歌词加进来。</p>}
             <div className="mats">
-              {saved.map((m) => <MaterialCard key={m.id} m={m} saved onToggle={() => toggleMat(m)} onEdit={() => setMatForm(m)} />)}
+              {saved.map((m) => <MaterialCard key={m.id} m={m} saved onToggle={() => toggleMat(m)} onEdit={() => setMatForm(m)} onTranslate={sample ? () => void translate(m) : undefined} live={trans?.id === m.id ? trans.text : null} />)}
+              {chatError && <p className="review-error">{chatError}</p>}
             </div>
           </div>
         )}
