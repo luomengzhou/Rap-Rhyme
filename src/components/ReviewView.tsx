@@ -15,6 +15,11 @@ interface Props {
   state: ReviewState | undefined
   setState: (s: ReviewState | undefined) => void
   onSaveAsNew: (text: string) => void
+  /** 给 Claude 的背景数据，如 BPM、小节数 */
+  facts: string
+  /** 从别的页面带过来、要自动发出的问题 */
+  ask: string
+  clearAsk: () => void
 }
 
 const STATUS_NOTE: Record<Exclude<Status, 'ok'>, string> = {
@@ -23,10 +28,13 @@ const STATUS_NOTE: Record<Exclude<Status, 'ok'>, string> = {
 }
 
 const STARTERS = [
+  '帮我把这份草稿分成 intro / verse / hook / outro',
   '通读整首，说说你读到的主题和明线暗线',
   '结构怎么调？哪几句适合抽出来做 hook',
   '押韵上有哪些词可以换，给我几个选项',
   '和这首手法像的歌有哪些，我去听听',
+  '这首长短合适吗？要不要加长',
+  '我想给这首配 beat，下一步怎么做',
 ]
 
 /** 找出一行里真正变了的那一段，其余部分保持原样 */
@@ -38,7 +46,7 @@ function inline(a: string, b: string): [string, string, string, string, string] 
   return [a.slice(0, p), a.slice(p, a.length - s), b.slice(p, b.length - s), a.slice(a.length - s), b.slice(0, p)]
 }
 
-export function ReviewView({ title, text, state, setState, onSaveAsNew }: Props) {
+export function ReviewView({ title, text, state, setState, onSaveAsNew, facts, ask, clearAsk }: Props) {
   const cur: ReviewState = state ?? { review: { title: `${title || '未命名'} · 改稿`, suggestions: [] }, accepted: [], choice: {}, chat: [] }
   const { review, accepted, choice } = cur
   const chat = cur.chat ?? []
@@ -96,7 +104,7 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew }: Props)
     ctl.current = new AbortController()
     let answer = ''
     try {
-      const res = await sample(buildInput(title, text, turns), {
+      const res = await sample(buildInput(title, text, turns, facts), {
         cache: false,
         signal: ctl.current.signal,
         onText: ({ text: t }) => setStreaming(splitReply(t).text),
@@ -117,6 +125,14 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew }: Props)
       review: { ...now.review, suggestions: [...now.review.suggestions, ...suggestions] },
     })
   }
+
+  // 从“结构”页带过来的问题，等 Claude 连上后自动发出
+  useEffect(() => {
+    if (!ask || sample === undefined) return
+    clearAsk()
+    if (sample) void send(ask)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask, sample])
 
   const applied = useMemo(() => applyReview(text, review, new Set(accepted), choice), [text, review, accepted, choice])
   const rows = useMemo(() => diffLines(text, applied.text), [text, applied])

@@ -49,11 +49,14 @@ const RULES = `你是一个说唱写词搭档，在一个写词网站的“改�
 - find 必须是从下面草稿里一字不差抄出来的一段（不要带 * 号），尽量短但要能唯一定位。replace 为空字符串表示删掉。
 - 断行：replace 写成 "\\n" 加上原文。挪动几行：一条建议里放两处 edits，一处把原文删掉（replace 为空），一处在目标位置的锚点文字上加上这几行。段落标题沿用草稿里的写法，比如【hook】。
 - options 可选，是 edits 里第一处改动的其他写法。
+- 分段（划分 intro / verse / hook / bridge / outro）：只用一条建议，tag 用“结构”，每个要加的标题是一处 edit，find 是那一段的第一行原文，replace 是 "【标题】\n" 加上这行原文。草稿里已有的标题不要重复加。判断不了哪里是 hook 时直说，并建议哪几句适合抽出来。
+- 被问到长短：结合下面给的小节数和估算时长说实话。长短跟着内容走：长的叙事歌可以五六分钟，短的两分钟出头也很常见。说清楚如果加长可以加什么（再唱一遍 hook、补一段 verse、加 bridge），如果不加为什么也成立，让作者自己选。
+- 被问到配 beat 或下一步：按顺序给两三步具体能做的事，例如先定速度和气质（网站底部可以换 beat 和 BPM 跟着念）、去“打拍”页把最顺的一句敲出来、再去找一条 type beat 跟着念并录音、念不顺的行回来改。不要一次讲太多。
 - 一次最多给 6 条，挑最值得改的。正文里不用重复代码块的内容，简单说你给了哪几类建议就行。`
 
 /** 组装发给 Claude 的对话：规则和当前草稿放在最前面，后面是页面保存的对话 */
-export function buildInput(title: string, draft: string, turns: Turn[]): Turn[] {
-  const head = `${RULES}\n\n草稿标题：${title || '未命名'}\n\n当前草稿（带 ** 的词是作者标出的想押的词）：\n<<<\n${draft.slice(0, 20000)}\n>>>`
+export function buildInput(title: string, draft: string, turns: Turn[], facts = ''): Turn[] {
+  const head = `${RULES}\n\n草稿标题：${title || '未命名'}\n${facts ? facts + '\n' : ''}\n当前草稿（带 ** 的词是作者标出的想押的词）：\n<<<\n${draft.slice(0, 20000)}\n>>>`
   // 只带最近的对话，免得越聊越长
   return [{ role: 'user', content: head }, ...turns.slice(-16)]
 }
