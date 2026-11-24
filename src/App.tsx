@@ -41,6 +41,7 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState<RhymeIndex | null>(null)
   const [playing, setPlaying] = useState(false)
+  const [confirmDel, setConfirmDel] = useState(false)
   const [sel, setSel] = useState({ start: 0, end: 0, text: '' })
   const input = useRef<HTMLTextAreaElement>(null)
 
@@ -131,7 +132,7 @@ export default function App() {
         </nav>
         {(view === 'write' || view === 'review') && (
           <div className="drafts">
-            <select value={draft.id} onChange={(e) => setActiveId(e.target.value)}>
+            <select value={draft.id} onChange={(e) => { setActiveId(e.target.value); setConfirmDel(false) }}>
               {drafts.map((d) => (
                 <option key={d.id} value={d.id}>{d.title || '未命名'}</option>
               ))}
@@ -146,17 +147,23 @@ export default function App() {
             >
               新建
             </button>
-            <button
-              disabled={drafts.length < 2}
-              onClick={() => {
-                if (draft.text.trim() && !window.confirm(`删除「${draft.title}」？这一步不能撤销。`)) return
-                const rest = drafts.filter((d) => d.id !== draft.id)
-                setDrafts(rest)
-                setActiveId(rest[0].id)
-              }}
-            >
-              删除
-            </button>
+            {confirmDel ? (
+              <>
+                <button
+                  onClick={() => {
+                    const rest = drafts.filter((d) => d.id !== draft.id)
+                    setDrafts(rest)
+                    setActiveId(rest[0].id)
+                    setConfirmDel(false)
+                  }}
+                >
+                  确定删除
+                </button>
+                <button onClick={() => setConfirmDel(false)}>取消</button>
+              </>
+            ) : (
+              <button disabled={drafts.length < 2} onClick={() => setConfirmDel(true)}>删除</button>
+            )}
           </div>
         )}
       </header>
