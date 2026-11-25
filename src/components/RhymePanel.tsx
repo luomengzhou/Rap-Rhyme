@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { addItems, matchGroups, parseItems, sourceOf, type RhymeGroup } from '../lib/book'
 import { findRhymes, toSyls, type Mode, type RhymeIndex } from '../lib/rhyme'
-import { N_LABEL } from '../lib/palette'
+import { colorOf, N_LABEL } from '../lib/palette'
 
 interface Props {
   index: RhymeIndex | null
@@ -14,11 +15,64 @@ interface Props {
   setLiked: (b: string[]) => void
   /** 点一个词：插入到草稿光标处 */
   onPick?: (w: string) => void
+  /** 韵脚本：自己从歌里记下来的韵组 */
+  groups: RhymeGroup[]
+  setGroups: Dispatch<SetStateAction<RhymeGroup[]>>
+  onAsk?: (q: string) => void
+}
+
+interface BoxProps {
+  g: RhymeGroup
+  setGroups: Dispatch<SetStateAction<RhymeGroup[]>>
+  onPick?: (w: string) => void
+  onAsk?: (q: string) => void
+}
+
+/** 一组记下来的韵：带颜色的框，写着出处，点词可以插进草稿 */
+function GroupBox({ g, setGroups, onPick, onAsk }: BoxProps) {
+  const [more, setMore] = useState('')
+  const [sure, setSure] = useState(false)
+  const patch = (f: (x: RhymeGroup) => RhymeGroup) => setGroups((all) => all.map((x) => (x.id === g.id ? f(x) : x)))
+  return (
+    <div className="rh-box" style={{ borderColor: colorOf(g.color) }}>
+      <div className="rh-src" style={{ color: colorOf(g.color) }}>{sourceOf(g)}</div>
+      <div className="chips">
+        {g.items.map((it) => (
+          <span key={it} className="chip">
+            <button className="w" title={onPick ? '点击插入草稿' : undefined} onClick={() => onPick?.(it)}>{it}</button>
+            <button className="act" title="从这组里去掉" onClick={() => patch((x) => ({ ...x, items: x.items.filter((y) => y !== it) }))}>×</button>
+          </span>
+        ))}
+      </div>
+      <form className="row tight" onSubmit={(e) => { e.preventDefault(); patch((x) => addItems(x, parseItems(more))); setMore('') }}>
+        <input value={more} onChange={(e) => setMore(e.target.value)} placeholder="再加几个，用逗号隔开" aria-label="往这组里加词" />
+        {onAsk && (
+          <button type="button" className="link" onClick={() => onAsk(`我记了一组韵：${g.items.join(' / ')}${g.song || g.artist ? `（出自 ${sourceOf(g)}）` : ''}。请告诉我：这几个放在一起押的是哪个音，哪些押得严、哪些是靠读法带过去的宽押，要怎么读才押得上；再给我 8 个左右能接进这组的常用词或短语，标出哪些是宽押。不要为了押韵凑生僻词。`)}>问 Claude</button>
+        )}
+        {sure ? (
+          <>
+            <button type="button" className="link" onClick={() => setGroups((all) => all.filter((x) => x.id !== g.id))}>确定删掉</button>
+            <button type="button" className="link" onClick={() => setSure(false)}>不删</button>
+          </>
+        ) : (
+          <button type="button" className="link" onClick={() => setSure(true)}>删这组</button>
+        )}
+      </form>
+    </div>
+  )
 }
 
 const SHOW = 240
 
-export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, setBlocked, liked, setLiked, onPick }: Props) {
+export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, setBlocked, liked, setLiked, onPick, groups, setGroups, onAsk }: Props) {
+  const mine = useMemo(() => matchGroups(groups, query, mode), [groups, query, mode])
+  const [draft, setDraft] = useState({ items: '', song: '', artist: '' })
+  const addGroup = () => {
+    const items = parseItems(draft.items)
+    if (!items.length) return
+    setGroups((all) => [...all, { id: 'g' + Math.random().toString(36).slice(2, 10), items, song: draft.song.trim(), artist: draft.artist.trim(), color: all.length }])
+    setDraft({ items: '', song: '', artist: '' })
+  }
   const [n, setN] = useState(2)
   const [sameTone, setSameTone] = useState(false)
   const [showRare, setShowRare] = useState(false)
@@ -79,6 +133,12 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
         </select>
       </div>
 
+      {mine.length > 0 && (
+        <div className="rh-mine">
+          <div className="muted">你记过的韵里用得上的：</div>
+          {mine.map((g) => <GroupBox key={g.id} g={g} setGroups={setGroups} onPick={onPick} onAsk={onAsk} />)}
+        </div>
+      )}
       {!index && <p className="muted">正在加载词库…</p>}
       {index && syls.length > 0 && (
         <p className="muted key">
@@ -105,6 +165,19 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
       {hits.length > shown.length && (
         <button className="link" onClick={() => setAll(true)}>显示全部 {hits.length} 个</button>
       )}
+      <details className="rh-book">
+        <summary>韵脚本（{groups.length} 组）</summary>
+        <p className="muted">听歌、看歌词时觉得押得好的一组词记在这里，写上是哪首歌里的。查词时，记过的会排在最前面。英文和别的外文只认你记过的词本身。也可以在“改稿”的素材卡片里直接划词来记。</p>
+        <form className="rh-new" onSubmit={(e) => { e.preventDefault(); addGroup() }}>
+          <input id="rh-items" value={draft.items} onChange={(e) => setDraft({ ...draft, items: e.target.value })} placeholder="一组韵，用逗号隔开，短语里可以有空格" />
+          <div className="row tight">
+            <input id="rh-song" value={draft.song} onChange={(e) => setDraft({ ...draft, song: e.target.value })} placeholder="歌名（自己想的就不填）" />
+            <input id="rh-artist" value={draft.artist} onChange={(e) => setDraft({ ...draft, artist: e.target.value })} placeholder="歌手" />
+            <button type="submit" className="primary" disabled={!parseItems(draft.items).length}>记一组</button>
+          </div>
+        </form>
+        {groups.filter((g) => !mine.includes(g)).map((g) => <GroupBox key={g.id} g={g} setGroups={setGroups} onPick={onPick} onAsk={onAsk} />)}
+      </details>
       {blocked.length > 0 && (
         <p className="muted foot">
           已屏蔽 {blocked.length} 个词。<button className="link" onClick={() => setBlocked([])}>全部恢复</button>

@@ -14,6 +14,7 @@ import { StructurePanel } from './components/StructurePanel'
 import { RefsView, type SongRef } from './components/RefsView'
 import { ReviewView, type ReviewState } from './components/ReviewView'
 import type { Material } from './lib/ai'
+import type { RhymeGroup } from './lib/book'
 import { TheoryView } from './components/TheoryView'
 
 interface Draft {
@@ -56,6 +57,7 @@ export default function App() {
   const [template, setTemplate] = useStored<SectionTpl[]>('rr.template', REGULAR_TEMPLATE)
   const [refs, setRefs] = useStored<SongRef[]>('rr.refs', [])
   const [reviews, setReviews] = useStored<Record<string, ReviewState>>('rr.reviews', {})
+  const [groups, setGroups] = useStored<RhymeGroup[]>('rr.rhymeGroups', [])
   // 素材所有草稿共用。以前是跟着每份草稿存的，第一次打开时把它们收到一起
   const [materials, setMaterials] = useStored<Material[]>('rr.materials', gatherMaterials(reviews))
   const [query, setQuery] = useState('')
@@ -221,7 +223,7 @@ export default function App() {
                 <CheckPanel analysis={analysis} delivery={delivery} setDelivery={setDeliveryId} bpm={bpm} maxPerLine={limit} mode={mode} setMode={setMode} onWord={lookup} onJump={jump} />
               )}
               {side === 'rhyme' && (
-                <RhymePanel index={index} query={query} setQuery={setQuery} mode={mode} setMode={setMode} blocked={blocked} setBlocked={setBlocked} liked={liked} setLiked={setLiked} onPick={insert} />
+                <RhymePanel index={index} query={query} setQuery={setQuery} mode={mode} setMode={setMode} blocked={blocked} setBlocked={setBlocked} liked={liked} setLiked={setLiked} onPick={insert} groups={groups} setGroups={setGroups} onAsk={askClaude} />
               )}
               {side === 'structure' && (
                 <StructurePanel beatId={beatId} onAsk={askClaude} analysis={analysis} template={template} setTemplate={setTemplate} bpm={bpm} onInsert={insertTemplate} onJump={jump} />
@@ -241,6 +243,8 @@ export default function App() {
           state={reviews[draft.id]}
           materials={materials}
           setMaterials={setMaterials}
+          groups={groups}
+          setGroups={setGroups}
           setState={(s) => {
             const next = { ...reviews }
             if (s) next[draft.id] = s

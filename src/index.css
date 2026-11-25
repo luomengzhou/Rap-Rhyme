@@ -285,3 +285,16 @@ a { color: var(--accent); }
 a.btn { display: inline-block; text-decoration: none; color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
 a.btn.primary { background: var(--accent); border-color: var(--accent); color: #06202e; font-weight: 600; }
 .hum-code { width: 100%; margin-top: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; line-height: 1.6; white-space: pre; overflow-x: auto; resize: vertical; }
+mark.rh { background: none; border-bottom: 2px solid; border-radius: 0; padding: 0 1px; font-weight: 600; }
+.rh-pick { border-width: 1px 1px 1px 3px; }
+.rh-groups { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; font-size: 13px; color: #c9ccd6; }
+.rh-groups > div { border-left: 3px solid; padding-left: 8px; }
+.rh-box { border: 1px solid; border-left-width: 4px; border-radius: 8px; padding: 8px 10px; margin: 8px 0; background: var(--panel); }
+.rh-box .chips { margin: 6px 0; }
+.rh-box input { flex: 1; min-width: 0; font-size: 13px; padding: 3px 8px; }
+.rh-src { font-size: 12px; font-weight: 600; }
+.rh-mine { margin: 10px 0; }
+.rh-book { margin: 14px 0; }
+.rh-book summary { cursor: pointer; color: var(--dim); }
+.rh-new { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.rh-new input { min-width: 0; flex: 1; }

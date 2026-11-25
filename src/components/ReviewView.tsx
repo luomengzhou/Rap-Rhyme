@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { addItems, markLine, type RhymeGroup } from '../lib/book'
+import { colorOf } from '../lib/palette'
 import { buildInput, errorText, getSample, GLOSS_MAX_LINES, glossPrompt, locateGloss, splitReply, translatePrompt, type Material, type Sample, type Turn } from '../lib/ai'
 import { applyReview, diffLines, parseReview, type Review, type Status } from '../lib/review'
 
@@ -19,6 +21,9 @@ interface Props {
   /** 收藏的素材，所有草稿共用 */
   materials: Material[]
   setMaterials: Dispatch<SetStateAction<Material[]>>
+  /** 韵脚本，和写词页共用 */
+  groups: RhymeGroup[]
+  setGroups: Dispatch<SetStateAction<RhymeGroup[]>>
   onSaveAsNew: (text: string) => void
   /** 草稿还是空的时候，直接把提纲写进去 */
   onWrite: (text: string) => void
@@ -68,7 +73,14 @@ interface CardProps {
   onDropGloss?: (at: number) => void
   /** 正在翻译的那几句：最后一行的行号和已经写出来的部分 */
   glossing?: { at: number; text: string } | null
+  /** 从这张卡片里记下来的韵组，用来上色 */
+  groups?: RhymeGroup[]
+  /** 把划中的词记进一组韵；group 为空就新开一组 */
+  onRhyme?: (word: string, group: string | null) => void
 }
+
+/** 原文里有没有需要翻译的外文 */
+const foreign = (t: string) => /[A-Za-z\u3040-\u30ff\uac00-\ud7af]{2}/.test(t)
 
 /** 去掉 Claude 偶尔带上的 Markdown 星号、井号，段落名单独加粗 */
 function Plain({ text }: { text: string }) {
@@ -83,17 +95,20 @@ function Plain({ text }: { text: string }) {
   )
 }
 
-function MaterialCard({ m, saved, onToggle, onEdit, onTranslate, live, onGloss, onDropGloss, glossing }: CardProps) {
+function MaterialCard({ m, saved, onToggle, onEdit, onTranslate, live, onGloss, onDropGloss, glossing, groups = [], onRhyme }: CardProps) {
   const tr = live ?? m.translation ?? ''
   const lines = m.text.split('\n')
   const box = useRef<HTMLDivElement>(null)
-  const [sel, setSel] = useState<{ src: string; at: number; n: number } | null>(null)
+  const [sel, setSel] = useState<{ src: string; at: number; n: number; word: string } | null>(null)
   const pick = () => {
     const s = window.getSelection()
     const el = box.current
     if (!s || s.isCollapsed || !el || !s.anchorNode || !s.focusNode || !el.contains(s.anchorNode) || !el.contains(s.focusNode)) return setSel(null)
-    const hit = locateGloss(m.text, s.toString())
-    setSel(hit ? { ...hit, n: hit.src.split('\n').length } : null)
+    const raw = s.toString()
+    const hit = locateGloss(m.text, raw)
+    // 一行以内、不太长的一小段，可以记成韵脚
+    const word = raw.trim()
+    setSel(hit ? { ...hit, n: hit.src.split('\n').length, word: !word.includes('\n') && word.length <= 40 ? word : '' } : null)
   }
   const glossAt = (i: number) => (glossing?.at === i ? { zh: glossing.text, live: true } : m.glosses?.find((g) => g.at === i))
   return (
@@ -109,7 +124,7 @@ function MaterialCard({ m, saved, onToggle, onEdit, onTranslate, live, onGloss, 
             const g = glossAt(i)
             return (
               <div key={i}>
-                {l.trim() ? <div>{l}</div> : <div className="mat-gap" />}
+                {l.trim() ? <div>{groups.length ? markLine(l, groups).map((sg, k) => (sg.group < 0 ? sg.text : <mark key={k} className="rh" style={{ borderColor: colorOf(groups[sg.group].color), color: colorOf(groups[sg.group].color) }}>{sg.text}</mark>)) : l}</div> : <div className="mat-gap" />}
                 {g && (
                   <div className="mat-gloss">
                     {g.zh ? <Plain text={g.zh} /> : <span className="muted">正在翻译…</span>}
@@ -121,17 +136,33 @@ function MaterialCard({ m, saved, onToggle, onEdit, onTranslate, live, onGloss, 
           })}
         </div>
       )}
-      {onGloss && m.text.trim() && (
+      {sel && (
         <div className="row tight mat-pick">
-          {sel ? (
+          {onGloss && foreign(sel.src) && (
             sel.n > GLOSS_MAX_LINES ? (
-              <span className="muted">划了 {sel.n} 行，一次最多 {GLOSS_MAX_LINES} 行，少划几句。</span>
+              <span className="muted">划了 {sel.n} 行，一次最多翻译 {GLOSS_MAX_LINES} 行。</span>
             ) : (
               <button className="primary" disabled={!!glossing} onClick={() => { onGloss(sel.src, sel.at); setSel(null); window.getSelection()?.removeAllRanges() }}>翻译划中的这 {sel.n} 行</button>
             )
-          ) : (
-            <span className="muted">用鼠标划几句原文，就翻译那几句，译文会夹在原文下面。</span>
           )}
+          {onRhyme && sel.word && (
+            <>
+              <span className="muted">把“{sel.word}”记成韵脚：</span>
+              {groups.map((g) => (
+                <button key={g.id} className="rh-pick" style={{ borderColor: colorOf(g.color) }} title={g.items.join(' / ')} onClick={() => { onRhyme(sel.word, g.id); setSel(null); window.getSelection()?.removeAllRanges() }}>
+                  和 {g.items[0]} 一组
+                </button>
+              ))}
+              <button onClick={() => { onRhyme(sel.word, null); setSel(null); window.getSelection()?.removeAllRanges() }}>新的一组</button>
+            </>
+          )}
+        </div>
+      )}
+      {groups.length > 0 && (
+        <div className="rh-groups">
+          {groups.map((g) => (
+            <div key={g.id} style={{ borderColor: colorOf(g.color) }}>{g.items.join(' / ')}</div>
+          ))}
         </div>
       )}
       {tr && (
@@ -145,7 +176,7 @@ function MaterialCard({ m, saved, onToggle, onEdit, onTranslate, live, onGloss, 
       <div className="row tight">
         <button className={saved ? 'primary' : ''} onClick={onToggle}>{saved ? (onEdit ? '取消收藏' : '已收藏') : '收藏'}</button>
         {onEdit && <button className="link" onClick={onEdit}>改</button>}
-        {onTranslate && m.text.trim() && <button className="link" disabled={live != null} onClick={onTranslate}>{m.translation ? '重新讲一遍大意' : '讲讲整段大意'}</button>}
+        {onTranslate && foreign(m.text) && <button className="link" disabled={live != null} onClick={onTranslate}>{m.translation ? '重新讲一遍大意' : '讲讲整段大意'}</button>}
         <a className="right" href={searchUrl(m)} target="_blank" rel="noreferrer">搜原文核对</a>
       </div>
     </article>
@@ -161,7 +192,7 @@ function inline(a: string, b: string): [string, string, string, string, string] 
   return [a.slice(0, p), a.slice(p, a.length - s), b.slice(p, b.length - s), a.slice(a.length - s), b.slice(0, p)]
 }
 
-export function ReviewView({ title, text, state, setState, materials: saved, setMaterials, onSaveAsNew, onWrite, facts, ask, clearAsk }: Props) {
+export function ReviewView({ title, text, state, setState, materials: saved, setMaterials, groups, setGroups, onSaveAsNew, onWrite, facts, ask, clearAsk }: Props) {
   const cur: ReviewState = state ?? { review: { title: `${title || '未命名'} · 改稿`, suggestions: [] }, accepted: [], choice: {}, chat: [] }
   const { review, accepted, choice } = cur
   const chat = cur.chat ?? []
@@ -211,6 +242,12 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
     setMaterials((all) => all.map((x) => (x.id === m.id ? { ...x, glosses: [...(x.glosses ?? []).filter((g) => g.at !== at), { src, zh: out, at }] } : x)))
   }
   const dropGloss = (m: Material, at: number) => setMaterials((all) => all.map((x) => (x.id === m.id ? { ...x, glosses: (x.glosses ?? []).filter((g) => g.at !== at) } : x)))
+  const rhyme = (m: Material, word: string, group: string | null) =>
+    setGroups((all) =>
+      group
+        ? all.map((g) => (g.id === group ? addItems(g, [word]) : g))
+        : [...all, { id: 'g' + Math.random().toString(36).slice(2, 10), items: [word], song: m.title, artist: m.source, color: all.length, from: m.id }],
+    )
   const toggleMat = (m: Material) =>
     setMaterials((all) => (all.some((x) => x.title === m.title) ? all.filter((x) => x.title !== m.title) : [...all, { ...m, id: 'm' + Math.random().toString(36).slice(2, 10) }]))
 
@@ -466,7 +503,7 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
 
         {tab === 'mats' && (
           <div className="pane">
-            <p className="muted">收藏的典故、诗词、意象和参考歌曲，所有草稿和版本共用一份。Claude 凭记忆给的内容，用之前点“搜原文核对”确认一下。</p>
+            <p className="muted">收藏的典故、诗词、意象和参考歌曲，所有草稿和版本共用一份。Claude 凭记忆给的内容，用之前点“搜原文核对”确认一下。在卡片的原文里用鼠标划一下：划几行外文可以只翻译那几行；划一个词或短语可以记成韵脚，同一组韵会标上同一种颜色，写词页查韵时会排在最前面。</p>
             {matForm ? (
               <form className="mat-form" onSubmit={(e) => { e.preventDefault(); saveMat() }}>
                 <div className="row tight">
@@ -490,7 +527,7 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
             )}
             {saved.length === 0 && !matForm && <p className="muted">还没有收藏。可以和 Claude 聊主题让它给素材，也可以把自己查到的原文、歌词加进来。</p>}
             <div className="mats">
-              {saved.map((m) => <MaterialCard key={m.id} m={m} saved onToggle={() => toggleMat(m)} onEdit={() => setMatForm(m)} onTranslate={sample ? () => void translate(m) : undefined} live={trans?.id === m.id ? trans.text : null} onGloss={sample ? (src, at) => void gloss(m, src, at) : undefined} onDropGloss={(at) => dropGloss(m, at)} glossing={glossing?.id === m.id ? glossing : null} />)}
+              {saved.map((m) => <MaterialCard key={m.id} m={m} saved onToggle={() => toggleMat(m)} onEdit={() => setMatForm(m)} onTranslate={sample ? () => void translate(m) : undefined} live={trans?.id === m.id ? trans.text : null} onGloss={sample ? (src, at) => void gloss(m, src, at) : undefined} onDropGloss={(at) => dropGloss(m, at)} glossing={glossing?.id === m.id ? glossing : null} groups={groups.filter((g) => g.from === m.id)} onRhyme={(w, g) => rhyme(m, w, g)} />)}
               {chatError && <p className="review-error">{chatError}</p>}
             </div>
           </div>
