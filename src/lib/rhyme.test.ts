@@ -24,7 +24,8 @@ describe('拼音拆韵', () => {
   })
   it('j/q/x/y 后面的 u 是 ü', () => {
     expect(parsePinyin('ju4')!.strict).toBe('v')
-    expect(parsePinyin('yuan2')!.strict).toBe('an')
+    expect(parsePinyin('yuan2')!.strict).toBe('ian')
+    expect(parsePinyin('yuan2')!.loose).toBe('an')
     expect(parsePinyin('lu4')!.strict).toBe('u')
   })
 })
@@ -59,5 +60,19 @@ describe('找韵', () => {
     expect(findRhymes(index, '不错', { n: 2, mode: 'strict' }).every((h) => h.word.tier < 2)).toBe(true)
     const r = findRhymes(index, '不错', { n: 2, mode: 'strict', blocked: new Set(['渡过']) })
     expect(r.map((h) => h.word.w)).not.toContain('渡过')
+  })
+})
+
+describe('an / uan 和 ian / üan 分开', () => {
+  const find = (mode: 'strict' | 'loose') => findRhymes(index, '残喘', { n: 2, mode }).map((h) => h.word.w)
+  it('严格：残喘押干旱、叛乱，不押完全、安全、看见', () => {
+    const w = find('strict')
+    expect(w).toEqual(expect.arrayContaining(['干旱', '叛乱']))
+    for (const x of ['完全', '安全', '看见']) expect(w).not.toContain(x)
+  })
+  it('含宽押时它们还在，并且标成宽押', () => {
+    const hits = findRhymes(index, '残喘', { n: 2, mode: 'loose' })
+    expect(hits.find((h) => h.word.w === '安全')?.looseOnly).toBe(true)
+    expect(hits.find((h) => h.word.w === '干旱')?.looseOnly).toBe(false)
   })
 })

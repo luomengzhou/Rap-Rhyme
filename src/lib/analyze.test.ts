@@ -45,11 +45,11 @@ describe('韵脚检查', () => {
     expect(a.sections.map((s) => [s.name, s.bars])).toEqual([['主歌1', 2], ['副歌', 1]])
   })
   it('句中的内押只认真词', () => {
-    const t = '曾卖过吸管\n屋外是饥寒\n一口气全部塞进这里面你说行不行'
-    const isWord = (w: string) => w === '里面'
+    const t = '曾卖过吸管\n屋外是饥寒\n一口气全部塞进这机关你说行不行'
+    const isWord = (w: string) => w === '机关'
     const marks = analyze(t, { mode: 'strict', isWord }).lines[2].marks
     expect(marks[t.split('\n')[2].indexOf('气')]).toBe(-1)
-    expect(marks[t.split('\n')[2].indexOf('里')]).not.toBe(-1)
+    expect(marks[t.split('\n')[2].indexOf('机')]).not.toBe(-1)
   })
   it('估算英文音节', () => {
     expect(latinSyllables('Call me GOD')).toBe(3)

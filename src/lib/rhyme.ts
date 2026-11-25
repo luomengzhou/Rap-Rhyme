@@ -1,5 +1,6 @@
 // 中文押韵引擎：把拼音拆成“韵”，按最后 N 个音节的韵是否相同来判断 N 押。
-// 严格模式比较“主要元音 + 韵尾”，忽略 i/u/ü 介音（一万 / 吸管 / 比惨 算同押）。
+// 严格模式比较“主要元音 + 韵尾”，忽略 i/u/ü 介音（一万 / 吸管 / 比惨 算同押）；
+// 例外是 ian / üan，介音把元音带成了另一个音，和 an / uan 分开。
 // 宽押模式再按十三辙的习惯合并相近的韵（en/eng、in/ing、e/o 等）。
 import { pinyin } from 'pinyin-pro'
 
@@ -29,7 +30,8 @@ const STRICT: Record<string, string> = {
   ei: 'ei', uei: 'ei',
   ao: 'ao', iao: 'ao',
   ou: 'ou', iou: 'ou',
-  an: 'an', ian: 'an', uan: 'an', van: 'an',
+  // ian、üan 的元音实际读成偏“诶”的音（见、全），和 an、uan（看、喘）听起来不是一个韵
+  an: 'an', uan: 'an', ian: 'ian', van: 'ian',
   en: 'en', uen: 'en', in: 'in', vn: 'vn',
   ang: 'ang', iang: 'ang', uang: 'ang',
   eng: 'eng', ueng: 'eng', ing: 'ing',
@@ -42,6 +44,8 @@ const LOOSE: Record<string, string> = {
   i: 'i', 'i*': 'i', v: 'i', er: 'i',
   en: 'en', in: 'en', vn: 'en', eng: 'en', ing: 'en',
   ong: 'ong',
+  // 传统十三辙里 an / ian / uan / üan 同属一辙
+  ian: 'an',
 }
 
 /** 把一个带调拼音（如 cuo4、lv4）拆成韵类 */
