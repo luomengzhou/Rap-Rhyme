@@ -9,6 +9,8 @@ export interface ReviewState {
   accepted: string[]
   choice: Record<string, number>
   chat?: Turn[]
+  /** 自己动手改过的“改后”全文；有它的时候，改后稿以它为准 */
+  manual?: string
   /** 收藏的素材 */
   materials?: Material[]
 }
@@ -335,11 +337,33 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
   }, [ask, sample])
 
   const applied = useMemo(() => applyReview(text, review, new Set(accepted), choice), [text, review, accepted, choice])
-  const rows = useMemo(() => diffLines(text, applied.text), [text, applied])
+  const manual = cur.manual
+  const final = manual ?? applied.text
+  const rows = useMemo(() => diffLines(text, final), [text, final])
   const usable = review.suggestions.filter((s) => applied.status[s.id] !== 'missing')
-  const changed = applied.text !== text
+  const changed = final !== text
+  const [editing, setEditing] = useState(false)
+  const [dropManual, setDropManual] = useState(false)
+  const [manualMsg, setManualMsg] = useState('')
 
-  const toggle = (id: string) => setState({ ...cur, accepted: accepted.includes(id) ? accepted.filter((x) => x !== id) : [...accepted, id] })
+  const toggle = (id: string) => {
+    const on = !accepted.includes(id)
+    const next = { ...cur, accepted: on ? [...accepted, id] : accepted.filter((x) => x !== id) }
+    if (manual === undefined) return setState(next)
+    // 已经手改过：新接受的建议直接写进手改稿，找不到原句就不动
+    const s = review.suggestions.find((x) => x.id === id)
+    if (on && s) {
+      const one = applyReview(manual, { ...review, suggestions: [s] }, new Set([id]), choice)
+      if (one.status[id] === 'ok') {
+        setManualMsg('这条建议已经写进你手改的稿子里。')
+        return setState({ ...next, manual: one.text })
+      }
+      setManualMsg('你手改的稿子里找不到这条建议要改的原句，没有动它。可以照着建议自己改。')
+      return
+    }
+    setManualMsg('取消接受不会把你手改的稿子改回去，需要的话自己改回来。')
+    setState(next)
+  }
   const remove = (id: string) =>
     setState({ ...cur, review: { ...review, suggestions: review.suggestions.filter((s) => s.id !== id) }, accepted: accepted.filter((x) => x !== id) })
   const jump = (find: string) => {
@@ -387,14 +411,31 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
           <div>原稿<small>不会被改动</small></div>
           <div>
             改后<small>已接受 {accepted.filter((id) => applied.status[id] === 'ok').length} / {usable.length} 条</small>
-            {text.trim() ? (
-              <button className="primary" disabled={!changed} onClick={() => onSaveAsNew(applied.text)}>存为新草稿</button>
+            {manual !== undefined && <span className="tag">手改过</span>}
+            <button onClick={() => { if (!editing && manual === undefined) setState({ ...cur, manual: applied.text }); setEditing(!editing); setManualMsg('') }}>{editing ? '看对比' : '自己改'}</button>
+            {manual !== undefined && (dropManual ? (
+              <>
+                <button className="link" onClick={() => { setState({ ...cur, manual: undefined }); setEditing(false); setDropManual(false); setManualMsg('') }}>确定放弃</button>
+                <button className="link" onClick={() => setDropManual(false)}>不放弃</button>
+              </>
             ) : (
-              <button className="primary" disabled={!changed} onClick={() => { onWrite(applied.text); setState({ ...cur, accepted: [] }) }}>写进这份草稿</button>
+              <button className="link" title="丢掉手改的内容，回到按建议生成的改后稿" onClick={() => setDropManual(true)}>放弃手改</button>
+            ))}
+            {text.trim() ? (
+              <button className="primary" disabled={!changed} onClick={() => onSaveAsNew(final)}>存为新草稿</button>
+            ) : (
+              <button className="primary" disabled={!changed} onClick={() => { onWrite(final); setState({ ...cur, accepted: [], manual: undefined }); setEditing(false) }}>写进这份草稿</button>
             )}
           </div>
         </div>
-        <div className="diff-body">
+        {manualMsg && <p className="muted diff-note">{manualMsg}</p>}
+        {editing && (
+          <div className="diff-edit">
+            <pre className="dcell old">{text.replace(/\*/g, '') || '（原稿是空的）'}</pre>
+            <textarea id="review-manual" className="dcell new" value={manual ?? ''} onChange={(e) => setState({ ...cur, manual: e.target.value })} placeholder="在这里直接改。原稿在左边，不会被动到。" spellCheck={false} />
+          </div>
+        )}
+        <div className="diff-body" hidden={editing}>
           {!text.trim() && !changed && <p className="muted diff-empty">这份草稿还是空的。可以先在右边和 Claude 聊主题，让它把提纲写进来；也可以去“写词”里直接写。</p>}
           {rows.map((r, i) => {
             const left = r.left?.replace(/\*/g, '') ?? null
