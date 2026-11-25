@@ -268,3 +268,14 @@ a { color: var(--accent); }
 .mat-pair span { display: block; color: var(--dim); font-size: 13px; }
 .mat-pair em { display: block; font-style: normal; color: var(--ink); }
 .mat-tr { border-left-color: var(--accent); }
+.hum { max-width: 980px; }
+.hum-wave { width: 100%; height: 90px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin: 10px 0 4px; display: block; }
+.hum audio { height: 34px; }
+.hum-legend { display: inline-flex; gap: 12px; align-items: center; }
+.hum-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+.hum input[type='number'] { width: 70px; }
+.hum-match { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.hum-match li { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); }
+.hum-match li b { margin-right: 8px; }
+.hum-match li .link { margin-left: 8px; }
+.hum-match p { margin: 6px 0 0; color: var(--dim); line-height: 1.6; }

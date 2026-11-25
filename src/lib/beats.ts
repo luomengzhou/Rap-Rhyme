@@ -156,6 +156,27 @@ class Engine {
     this.listeners.forEach((fn) => fn(-1))
   }
 
+  /** 回放哼唱分析出来的节奏：咚 / 哒 / 叮各用选定的音色，重音更响 */
+  async playSteps(bpm: number, steps: { step: number; kind: 'low' | 'mid' | 'high'; accent: boolean }[], sounds: { low: string; mid: string; high: string }) {
+    await Tone.start()
+    this.init()
+    this.stop()
+    const now = Tone.now() + 0.08
+    const unit = 15 / bpm
+    for (const s of steps) {
+      const at = now + s.step * unit
+      const vel = s.accent ? 1 : 0.55
+      if (s.kind === 'low') {
+        if (sounds.low === '808') this.bass.triggerAttackRelease('C1', 0.45, at, vel)
+        else this.kick.triggerAttackRelease('C1', '8n', at, vel)
+      } else if (s.kind === 'mid') {
+        if (sounds.mid === 'rim') this.click.triggerAttackRelease('G5', '32n', at, vel)
+        else this.snare.triggerAttackRelease('16n', at, vel)
+      } else if (sounds.high === 'hat') this.hat.triggerAttackRelease('32n', at, vel)
+      else this.lead.triggerAttackRelease('C6', 0.4, at, vel)
+    }
+  }
+
   /** 乐理卡里的小示范：按给定的格子敲击，accent 为重音位置 */
   async demo(bpm: number, grid: number[], accents: number[] = [], division: '16n' | '8t' = '16n', notes?: string[]) {
     await Tone.start()

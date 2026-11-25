@@ -8,6 +8,7 @@ import { BeatBar } from './components/BeatBar'
 import { CheckPanel } from './components/CheckPanel'
 import { Editor } from './components/Editor'
 import { FlowView } from './components/FlowView'
+import { HumView } from './components/HumView'
 import { RhymePanel } from './components/RhymePanel'
 import { StructurePanel } from './components/StructurePanel'
 import { RefsView, type SongRef } from './components/RefsView'
@@ -20,7 +21,7 @@ interface Draft {
   text: string
 }
 
-type View = 'write' | 'review' | 'flow' | 'refs' | 'theory'
+type View = 'write' | 'review' | 'flow' | 'hum' | 'refs' | 'theory'
 type Side = 'check' | 'rhyme' | 'structure'
 
 const newDraft = (title = '新草稿'): Draft => ({ id: Math.random().toString(36).slice(2, 10), title, text: '' })
@@ -140,6 +141,7 @@ export default function App() {
           <button className={view === 'write' ? 'on' : ''} onClick={() => setView('write')}>写词</button>
           <button className={view === 'review' ? 'on' : ''} onClick={() => setView('review')}>改稿</button>
           <button className={view === 'flow' ? 'on' : ''} onClick={() => setView('flow')}>打拍</button>
+          <button className={view === 'hum' ? 'on' : ''} onClick={() => setView('hum')}>哼唱</button>
           <button className={view === 'refs' ? 'on' : ''} onClick={() => setView('refs')}>听歌笔记</button>
           <button className={view === 'theory' ? 'on' : ''} onClick={() => setView('theory')}>乐理卡</button>
         </nav>
@@ -238,6 +240,11 @@ export default function App() {
       {view === 'flow' && (
         <main className="single">
           <FlowView bpm={bpm} playing={playing} start={start} currentLine={currentLine} />
+        </main>
+      )}
+      {view === 'hum' && (
+        <main className="single">
+          <HumView onAsk={askClaude} />
         </main>
       )}
       {view === 'refs' && (
