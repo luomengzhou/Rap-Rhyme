@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { buildEnIndex, enKey, findEn, isEnglish, pronounce, syllables } from './en'
+import { buildEnIndex, cleanPhones, enKey, findEn, isEnglish, parseSaid, pronounce, syllables } from './en'
 
 const idx = buildEnIndex(readFileSync('public/data/en-words.txt', 'utf8'))
 const find = (q: string, n: number, mode: 'strict' | 'loose', showRare = false) => findEn(idx, q, { n, mode, showRare, blocked: new Set() })
@@ -46,5 +46,15 @@ describe('英文找韵', () => {
     expect(enKey(song, 1, 'strict')).not.toBe(enKey(on, 1, 'strict'))
     expect(words('on', 1, 'strict')).not.toContain('john')
     expect(words('on', 1, 'strict', true)).toContain('john')
+  })
+  it('词典没有的词，补了读音就能查', () => {
+    const extra = parseSaid('zzqx: Z IY1 K AH0 N\nother: nonsense\nbad: ZZ1', ['Zzqx', 'bad'])
+    expect(extra).toEqual({ zzqx: 'Z IY1 K AH0 N' })
+    expect(pronounce(idx, 'zzqx', extra).unknown).toEqual([])
+    const w = findEn(idx, 'zzqx', { n: 2, mode: 'loose', showRare: false, blocked: new Set(), extra }).map((h) => h.word.w)
+    expect(w).toEqual(expect.arrayContaining(['even', 'reason', 'season']))
+    expect(cleanPhones('ae0 k t iy1 ah0 n')).toBe('AE0 K T IY1 AH0 N')
+    expect(cleanPhones('K T')).toBeNull()
+    expect(cleanPhones('hello there')).toBeNull()
   })
 })

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
-import { enKey, findEn, isEnglish, loadEn, pronounce, syllables, type EnIndex } from '../lib/en'
+import { getSample } from '../lib/ai'
+import { cleanPhones, enKey, findEn, isEnglish, loadEn, parseSaid, pronounce, sayPrompt, syllables, type EnIndex } from '../lib/en'
+import { useStored } from '../lib/store'
 import { addItems, matchGroups, parseItems, sourceOf, type RhymeGroup } from '../lib/book'
 import { findRhymes, toSyls, type Mode, type RhymeIndex } from '../lib/rhyme'
 import { colorOf, N_LABEL } from '../lib/palette'
@@ -96,7 +98,39 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
     loadEn(import.meta.env.BASE_URL).then((i) => live && setEnIdx(i), () => live && setEnFail(true))
     return () => { live = false }
   }, [en, enIdx])
-  const said = useMemo(() => (en && enIdx ? pronounce(enIdx, query) : null), [en, enIdx, query])
+  // 词典里没有的词（人名、俚语），读音由 Claude 给或者自己按“读起来像”补，存在本地
+  const [extra, setExtra] = useStored<Record<string, string>>('rr.enSaid', {})
+  const [like, setLike] = useState('')
+  const [sayMsg, setSayMsg] = useState('')
+  const [asking, setAsking] = useState(false)
+  const said = useMemo(() => (en && enIdx ? pronounce(enIdx, query, extra) : null), [en, enIdx, query, extra])
+  const askSay = async (words: string[]) => {
+    setAsking(true)
+    setSayMsg('')
+    try {
+      const sample = await getSample()
+      if (!sample) setSayMsg('这里连不上 Claude，用右边的“读起来像”来补。')
+      else {
+        const got = parseSaid((await sample(sayPrompt(words), { cache: false })).text, words)
+        if (Object.keys(got).length) setExtra((e) => ({ ...e, ...got }))
+        else setSayMsg('Claude 没给出能用的读音，用“读起来像”来补。')
+      }
+    } catch {
+      setSayMsg('问 Claude 没成功，过一会儿再试，或者用“读起来像”来补。')
+    }
+    setAsking(false)
+  }
+  /** 用几个认识的词拼出读音，比如 Actaeon 读起来像 act tea on；也可以直接写音素 */
+  const sayLike = (word: string) => {
+    if (!enIdx) return
+    const direct = cleanPhones(like)
+    const p = pronounce(enIdx, like, extra)
+    if (!direct && (!p.ph.length || p.unknown.length)) return setSayMsg(`“${p.unknown.join('、') || like}”词典里也没有，换几个常见的词来拼。`)
+    setExtra((e) => ({ ...e, [word.toLowerCase().replace(/^'+|'+$/g, '')]: direct ?? p.ph.join(' ') }))
+    setLike('')
+    setSayMsg('')
+  }
+  const mineSaid = en ? query.toLowerCase().split(/[^a-z']+/).map((w) => w.replace(/^'+|'+$/g, '')).filter((w) => extra[w]) : []
 
   const syls = useMemo(() => (en ? [] : toSyls(query)), [en, query])
   const size = en ? (said && !said.unknown.length ? syllables(said.ph) : 0) : syls.length
@@ -109,7 +143,7 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
     const byLiked = (a: Shown, b: Shown) => Number(likedSet.has(b.w)) - Number(likedSet.has(a.w))
     if (en) {
       if (!enIdx || !size) return { hits: [], counts: [0, 0, 0, 0] }
-      const base = { mode, showRare, blocked: blockedSet }
+      const base = { mode, showRare, blocked: blockedSet, extra }
       const counts = [1, 2, 3, 4].map((k) => (k <= maxN ? findEn(enIdx, query, { ...base, n: k }).length : 0))
       const hits = findEn(enIdx, query, { ...base, n: useN }).map(({ word, looseOnly }) => ({ w: word.w, title: word.ph.join(' '), looseOnly, rare: word.tier === 2 }))
       return { hits: hits.sort(byLiked), counts }
@@ -119,10 +153,10 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
     const counts = [1, 2, 3, 4].map((k) => (k <= maxN ? findRhymes(index, query, { ...base, n: k }).length : 0))
     const hits = findRhymes(index, query, { ...base, n: useN }).map(({ word, looseOnly }) => ({ w: word.w, title: word.syls.map((x) => x.py.replace('v', 'ü') + (x.tone || '')).join(' '), looseOnly, rare: word.tier === 2 }))
     return { hits: hits.sort(byLiked), counts }
-  }, [en, enIdx, size, index, query, syls.length, mode, sameTone, showRare, length, blockedSet, likedSet, useN, maxN])
+  }, [en, enIdx, size, index, query, syls.length, mode, sameTone, showRare, length, blockedSet, likedSet, useN, maxN, extra])
 
   // 记过的韵组：中文按韵比；英文词典加载好后按最后两个元音比
-  const sound = useMemo(() => (enIdx ? (t: string) => { const p = pronounce(enIdx, t); return p.ph.length && !p.unknown.length ? p.ph : null } : undefined), [enIdx])
+  const sound = useMemo(() => (enIdx ? (t: string) => { const p = pronounce(enIdx, t, extra); return p.ph.length && !p.unknown.length ? p.ph : null } : undefined), [enIdx, extra])
   const mine = useMemo(() => matchGroups(groups, query, mode, sound), [groups, query, mode, sound])
   const shown = all ? hits : hits.slice(0, SHOW)
   const tail = syls.slice(-useN)
@@ -171,7 +205,25 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
       )}
       {!en && !index && <p className="muted">正在加载词库…</p>}
       {en && !enIdx && <p className="muted">{enFail ? '英文词典没加载出来，刷新页面再试。' : '正在加载英文发音词典…'}</p>}
-      {en && said && said.unknown.length > 0 && <p className="muted">发音词典里没有：{said.unknown.join('、')}。检查一下拼写，或者换一个读音相近的常见词来查。</p>}
+      {en && said && said.unknown.length > 0 && (
+        <div className="rh-say">
+          <b>发音词典里没有 {said.unknown.join('、')}</b>
+          <p className="muted">人名、神话里的名字和俚语常常不在词典里。先检查拼写；没拼错的话，补一个读音就能找韵，补过的会记住。</p>
+          <form className="row tight" onSubmit={(e) => { e.preventDefault(); sayLike(said.unknown[0]) }}>
+            <button type="button" className="primary" disabled={asking} onClick={() => void askSay(said.unknown)}>{asking ? '正在问…' : '让 Claude 给读音'}</button>
+            <input id="rh-like" value={like} onChange={(e) => setLike(e.target.value)} placeholder={`或者写 ${said.unknown[0]} 读起来像哪几个词`} />
+            <button type="submit" disabled={!like.trim()}>用这个读法</button>
+          </form>
+          {sayMsg && <p className="muted">{sayMsg}</p>}
+        </div>
+      )}
+      {mineSaid.length > 0 && (
+        <p className="muted key">
+          {mineSaid.map((w) => (
+            <span key={w}>{w} 按补的读音 <code>{extra[w]}</code><button className="link" onClick={() => setExtra((e) => { const n = { ...e }; delete n[w]; return n })}>重新补</button> </span>
+          ))}
+        </p>
+      )}
       {en && said && size > 0 && (
         <p className="muted key">
           押的音：<code>{enKey(said.ph, useN, mode)}</code>

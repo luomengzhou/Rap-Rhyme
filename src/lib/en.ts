@@ -65,10 +65,11 @@ export function buildEnIndex(raw: string): EnIndex {
 /** 歌词里的口语写法 */
 const SPOKEN: Record<string, string> = { em: 'AH0 M', "'em": 'AH0 M', cuz: 'K AH0 Z', "'cause": 'K AH0 Z', cause: 'K AH0 Z', ya: 'Y AH0', tryna: 'T R AY1 N AH0', gonna: 'G AH1 N AH0', wanna: 'W AA1 N AH0', gotta: 'G AA1 T AH0' }
 
-const lookup = (idx: EnIndex, raw: string): string[] | null => {
+const lookup = (idx: EnIndex, raw: string, extra?: Record<string, string>): string[] | null => {
   const w = raw.toLowerCase().replace(/[’`]/g, "'")
-  if (SPOKEN[w]) return SPOKEN[w].split(' ')
   const bare = w.replace(/^'+|'+$/g, '')
+  if (extra?.[bare]) return extra[bare].split(' ')
+  if (SPOKEN[w]) return SPOKEN[w].split(' ')
   const hit = idx.words.get(w) ?? idx.words.get(bare)
   if (hit) return hit.ph
   // droppin' / droppin -> dropping，结尾的 NG 读成 N
@@ -81,12 +82,12 @@ const lookup = (idx: EnIndex, raw: string): string[] | null => {
 
 export const isEnglish = (q: string) => /[a-z]/i.test(q) && !/[぀-ヿ㐀-鿿가-힯]/.test(q)
 
-/** 一个词或短语的读音；unknown 是词典里没有的词 */
-export function pronounce(idx: EnIndex, text: string): { ph: string[]; unknown: string[] } {
+/** 一个词或短语的读音；unknown 是词典里没有的词。extra 是自己补的读音（词 -> 音素） */
+export function pronounce(idx: EnIndex, text: string, extra?: Record<string, string>): { ph: string[]; unknown: string[] } {
   const ph: string[] = []
   const unknown: string[] = []
   for (const w of text.split(/[^A-Za-z'’`]+/).filter((x) => /[a-z]/i.test(x))) {
-    const p = lookup(idx, w)
+    const p = lookup(idx, w, extra)
     if (p) ph.push(...p)
     else unknown.push(w)
   }
@@ -104,11 +105,13 @@ export interface EnOptions {
   mode: Mode
   showRare: boolean
   blocked: Set<string>
+  /** 自己补的读音 */
+  extra?: Record<string, string>
 }
 
 /** 找押韵的词，常用的排前面；宽押模式下严格押的排最前 */
 export function findEn(idx: EnIndex, query: string, opt: EnOptions): EnHit[] {
-  const { ph, unknown } = pronounce(idx, query)
+  const { ph, unknown } = pronounce(idx, query, opt.extra)
   if (!ph.length || unknown.length) return []
   const own = new Set(query.toLowerCase().split(/[^a-z']+/))
   const ok = (w: EnWord) => !own.has(w.w) && !opt.blocked.has(w.w) && (opt.showRare || w.tier < 2)
@@ -126,3 +129,32 @@ export function findEn(idx: EnIndex, query: string, opt: EnOptions): EnHit[] {
 let cache: Promise<EnIndex> | null = null
 /** 第一次查英文时才去拿词表 */
 export const loadEn = (base: string) => (cache ??= fetch(base + 'data/en-words.txt').then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status))))).then(buildEnIndex).catch((e) => { cache = null; throw e }))
+
+const VOWELS = ['AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY', 'IH', 'IY', 'OW', 'OY', 'UH', 'UW']
+const CONS = new Set(['B', 'CH', 'D', 'DH', 'F', 'G', 'HH', 'JH', 'K', 'L', 'M', 'N', 'NG', 'P', 'R', 'S', 'SH', 'T', 'TH', 'V', 'W', 'Y', 'Z', 'ZH'])
+
+/** 检查一串音素是不是合法的写法（元音要带 0/1/2），合法就整理好返回，否则 null */
+export function cleanPhones(raw: string): string | null {
+  const ph = raw.trim().toUpperCase().split(/\s+/).filter(Boolean)
+  if (!ph.length || ph.length > 40) return null
+  const ok = ph.every((p) => CONS.has(p) || (/^[A-Z]{2}[012]$/.test(p) && VOWELS.includes(p.slice(0, 2))))
+  return ok && ph.some((p) => /\d$/.test(p)) ? ph.join(' ') : null
+}
+
+/** 词典里没有的词，让 Claude 给读音时用的提问 */
+export const sayPrompt = (words: string[]) =>
+  `给出下面这些英文词（可能是人名、神话里的名字、俚语或生造词）的美式英语读音，用 CMU 发音词典的 ARPAbet 音素写法：音素之间用空格隔开，元音后面带重音数字（1 主重音，2 次重音，0 不重读）。有多种读法时取最通行的一种。\n每个词一行，格式是：词，一个冒号，然后是音素。只输出这些行，不要别的文字。\n例子：\nproblem: P R AA1 B L AH0 M\n\n要读的词：\n${words.join('\n')}`
+
+/** 读 Claude 的回答，只留写法合法的 */
+export function parseSaid(text: string, words: string[]): Record<string, string> {
+  const want = new Set(words.map((w) => w.toLowerCase()))
+  const out: Record<string, string> = {}
+  for (const line of text.split('\n')) {
+    const m = /^\s*([A-Za-z'’]+)\s*[:：]\s*(.+)$/.exec(line)
+    if (!m) continue
+    const w = m[1].toLowerCase().replace(/’/g, "'")
+    const ph = cleanPhones(m[2])
+    if (ph && want.has(w)) out[w.replace(/^'+|'+$/g, '')] = ph
+  }
+  return out
+}
