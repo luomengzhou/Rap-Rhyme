@@ -47,6 +47,10 @@ describe('英文找韵', () => {
     expect(words('on', 1, 'strict')).not.toContain('john')
     expect(words('on', 1, 'strict', true)).toContain('john')
   })
+  it('结果带中文意思', () => {
+    expect(idx.words.get('vane')?.zh).toContain('风向标')
+    expect(idx.words.get('problem')?.zh).toContain('问题')
+  })
   it('词典没有的词，补了读音就能查', () => {
     const extra = parseSaid('zzqx: Z IY1 K AH0 N\nother: nonsense\nbad: ZZ1', ['Zzqx', 'bad'])
     expect(extra).toEqual({ zzqx: 'Z IY1 K AH0 N' })

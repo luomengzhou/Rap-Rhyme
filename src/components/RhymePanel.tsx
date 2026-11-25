@@ -73,6 +73,8 @@ interface Shown {
   title: string
   looseOnly: boolean
   rare: boolean
+  /** 中文意思（英文词才有） */
+  zh?: string
 }
 
 export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, setBlocked, liked, setLiked, onPick, groups, setGroups, onAsk }: Props) {
@@ -100,6 +102,7 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
   }, [en, enIdx])
   // 词典里没有的词（人名、俚语），读音由 Claude 给或者自己按“读起来像”补，存在本地
   const [extra, setExtra] = useStored<Record<string, string>>('rr.enSaid', {})
+  const [showZh, setShowZh] = useStored('rr.enZh', true)
   const [like, setLike] = useState('')
   const [sayMsg, setSayMsg] = useState('')
   const [asking, setAsking] = useState(false)
@@ -145,7 +148,7 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
       if (!enIdx || !size) return { hits: [], counts: [0, 0, 0, 0] }
       const base = { mode, showRare, blocked: blockedSet, extra }
       const counts = [1, 2, 3, 4].map((k) => (k <= maxN ? findEn(enIdx, query, { ...base, n: k }).length : 0))
-      const hits = findEn(enIdx, query, { ...base, n: useN }).map(({ word, looseOnly }) => ({ w: word.w, title: word.ph.join(' '), looseOnly, rare: word.tier === 2 }))
+      const hits = findEn(enIdx, query, { ...base, n: useN }).map(({ word, looseOnly }) => ({ w: word.w, title: word.ph.join(' '), looseOnly, rare: word.tier === 2, zh: word.zh }))
       return { hits: hits.sort(byLiked), counts }
     }
     if (!index || !syls.length) return { hits: [], counts: [0, 0, 0, 0] }
@@ -189,6 +192,7 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
         </div>
         {!en && <label><input type="checkbox" checked={sameTone} onChange={(e) => setSameTone(e.target.checked)} />末字同声调</label>}
         <label><input type="checkbox" checked={showRare} onChange={(e) => setShowRare(e.target.checked)} />生僻词</label>
+        {en && <label><input type="checkbox" checked={showZh} onChange={(e) => setShowZh(e.target.checked)} />中文意思</label>}
         <select hidden={en} value={length} onChange={(e) => setLength(Number(e.target.value))}>
           <option value={0}>字数不限</option>
           <option value={2}>2 个字</option>
@@ -242,11 +246,12 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
         </p>
       )}
       <div className="chips">
-        {shown.map(({ w, title, looseOnly, rare }) => (
+        {shown.map(({ w, title, looseOnly, rare, zh }) => (
           <span key={w} className={'chip' + (looseOnly ? ' loose' : '') + (likedSet.has(w) ? ' liked' : '') + (rare ? ' rare' : '')}>
-            <button className="w" title={title + (onPick ? ' · 点击插入草稿' : '')} onClick={() => onPick?.(w)}>
+            <button className="w" title={(zh ? zh + ' · ' : '') + title + (onPick ? ' · 点击插入草稿' : '')} onClick={() => onPick?.(w)}>
               {w}
               {looseOnly && <i>宽</i>}
+              {en && showZh && zh && <small>{zh}</small>}
             </button>
             <button className="act" title="喜欢，排到前面" onClick={() => setLiked(likedSet.has(w) ? liked.filter((x) => x !== w) : [...liked, w])}>♥</button>
             <button className="act" title="不押或不是词，以后不再出现" onClick={() => setBlocked([...blocked, w])}>×</button>

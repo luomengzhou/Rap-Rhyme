@@ -9,6 +9,8 @@ export interface EnWord {
   tier: number
   /** 在词表里的位置，越小越常用 */
   rank: number
+  /** 中文意思，没有就是空 */
+  zh: string
 }
 
 export interface EnIndex {
@@ -44,9 +46,9 @@ export const syllables = (ph: string[]) => ph.filter(isVowel).length
 export function buildEnIndex(raw: string): EnIndex {
   const idx: EnIndex = { words: new Map(), strict: [0, 1, 2, 3].map(() => new Map()), loose: [0, 1, 2, 3].map(() => new Map()) }
   raw.split('\n').forEach((line, rank) => {
-    const [w, p, t] = line.split('\t')
+    const [w, p, t, zh = ''] = line.split('\t')
     if (!w || !p) return
-    const word: EnWord = { w, ph: p.split(' '), tier: Number(t) || 0, rank }
+    const word: EnWord = { w, ph: p.split(' '), tier: Number(t) || 0, rank, zh }
     idx.words.set(w, word)
     for (const mode of ['strict', 'loose'] as const) {
       for (let n = 1; n <= 4; n++) {
