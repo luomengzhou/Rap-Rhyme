@@ -141,6 +141,17 @@ class Engine {
     }
   }
 
+  /** 回放识别出来的旋律：notes 的时间是秒，音高是 MIDI 编号 */
+  async playNotes(notes: { start: number; dur: number; midi: number; amp: number }[]) {
+    await Tone.start()
+    this.init()
+    this.stop()
+    if (!notes.length) return
+    const now = Tone.now() + 0.08
+    const t0 = notes[0].start
+    for (const n of notes) this.lead.triggerAttackRelease(Tone.Frequency(n.midi, 'midi').toFrequency(), Math.max(0.08, n.dur), now + n.start - t0, 0.4 + n.amp * 0.5)
+  }
+
   /** 乐理卡里的小示范：按给定的格子敲击，accent 为重音位置 */
   async demo(bpm: number, grid: number[], accents: number[] = [], division: '16n' | '8t' = '16n', notes?: string[]) {
     await Tone.start()

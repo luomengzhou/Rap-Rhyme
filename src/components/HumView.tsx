@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { BEATS, engine } from '../lib/beats'
 import { describe, detectHits, estimateBpm, KIND_NAME, PATTERNS, quantize, rank, STRUDEL_BANKS, strudelLink, toStrudel, type Hit, type Kind, type Step } from '../lib/hum'
+import { melodyStrudel, midiFile, noteName, type Note } from '../lib/melody'
+import { transcribe } from '../lib/pitch'
 import { useStored } from '../lib/store'
 
 interface Props {
@@ -38,6 +40,36 @@ export function HumView({ onAsk }: Props) {
   const [bank, setBank] = useStored('rr.humBank', '')
   const [copied, setCopied] = useState('')
   const codeBox = useRef<HTMLTextAreaElement>(null)
+  // 旋律：识别音高是另一步，要加载模型，点了才做
+  const audio = useRef<AudioBuffer | null>(null)
+  const [notes, setNotes] = useState<Note[] | null>(null)
+  const [pitching, setPitching] = useState<number | null>(null)
+  const [pitchMsg, setPitchMsg] = useState('')
+  const roll = useRef<HTMLCanvasElement>(null)
+  const findNotes = async () => {
+    if (!audio.current || pitching !== null) return
+    setPitching(0)
+    setPitchMsg('')
+    try {
+      const found = await transcribe(audio.current, import.meta.env.BASE_URL, setPitching)
+      setNotes(found)
+      if (!found.length) setPitchMsg('没听出稳定的音高。这段可能更像敲击或念白；哼的时候用“啦”或“嗯”把音拖长一点再试。')
+    } catch {
+      setPitchMsg('识别音高没成功。可能是模型没加载出来，刷新页面再试一次。')
+    }
+    setPitching(null)
+  }
+  const melodyCode = useMemo(() => (notes?.length ? melodyStrudel(notes, bpm) : ''), [notes, bpm])
+  const saveMidi = () => {
+    if (!notes?.length) return
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([midiFile(notes, bpm) as BlobPart], { type: 'audio/midi' }))
+    a.download = 'hum-melody.mid'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+  }
   const file = useRef<HTMLInputElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
 
@@ -49,6 +81,9 @@ export function HumView({ onAsk }: Props) {
       const ctx = new Ctx()
       const buf = await ctx.decodeAudioData(await blob.arrayBuffer())
       void ctx.close()
+      audio.current = buf
+      setNotes(null)
+      setPitchMsg('')
       const len = Math.min(buf.length, Math.round(MAX_SECONDS * buf.sampleRate))
       const mono = new Float32Array(len)
       for (let c = 0; c < buf.numberOfChannels; c++) {
@@ -137,6 +172,25 @@ export function HumView({ onAsk }: Props) {
       g.fillRect(x, hit.accent ? 0 : 10, 2, hit.accent ? h : h - 20)
     }
   }, [wave, hits, dur])
+
+  useEffect(() => {
+    const c = roll.current
+    const g = c?.getContext('2d')
+    if (!c || !g || !notes?.length) return
+    const lo = Math.min(...notes.map((n) => n.midi)) - 2
+    const hi = Math.max(...notes.map((n) => n.midi)) + 2
+    const end = Math.max(dur, ...notes.map((n) => n.start + n.dur))
+    const rowH = c.height / (hi - lo + 1)
+    g.clearRect(0, 0, c.width, c.height)
+    for (let m = lo; m <= hi; m++) {
+      g.fillStyle = [1, 3, 6, 8, 10].includes(((m % 12) + 12) % 12) ? '#ffffff05' : '#ffffff0c'
+      g.fillRect(0, (hi - m) * rowH, c.width, rowH - 1)
+    }
+    for (const n of notes) {
+      g.fillStyle = '#5ec8ff'
+      g.fillRect((n.start / end) * c.width, (hi - n.midi) * rowH + 1, Math.max(3, (n.dur / end) * c.width - 1), Math.max(3, rowH - 2))
+    }
+  }, [notes, dur])
 
   const matches = useMemo(() => {
     const site = BEATS.filter((b) => b.id !== 'click').map((b) => ({ id: 'site-' + b.id, name: `网站里的「${b.name}」`, note: b.desc, kick: b.kick.slice(0, 16), snare: b.snare.slice(0, 16) }))
@@ -241,6 +295,32 @@ export function HumView({ onAsk }: Props) {
             ))}
           </ul>
           <p className="muted">对照的是几种通用骨架和网站自带的示例 beat，只比落点的位置。相似度低于一半时，说明你哼的更像一句旋律或 flow，而不是鼓点。</p>
+          <h3>旋律：转成音符和 MIDI</h3>
+          <p className="muted">
+            如果你哼的是有音高的调子（“啦啦啦”那种），可以把它识别成音符。用的是 Spotify 开源的 Basic Pitch 模型，在你的浏览器里运行，录音不会传到别处。第一次要加载模型，稍等几秒。纯“咚哒”的敲击没有音高，不用点这个。
+          </p>
+          <div className="row">
+            <button className="primary" disabled={pitching !== null} onClick={() => void findNotes()}>{pitching !== null ? `正在识别 ${Math.round(pitching * 100)}%` : notes ? '重新识别' : '识别音高'}</button>
+            {notes && notes.length > 0 && (
+              <>
+                <button onClick={() => void engine.playNotes(notes)}>听一遍</button>
+                <button onClick={saveMidi}>下载 MIDI 文件</button>
+                <span className="muted">MIDI 可以直接拖进 FL Studio、GarageBand、BandLab，换成任何音色。在 claude.ai 里下载可能被拦住，这时用下面的 Strudel 代码，或者去 GitHub Pages 那一份下载。</span>
+              </>
+            )}
+            {pitchMsg && <span className="muted">{pitchMsg}</span>}
+          </div>
+          {notes && notes.length > 0 && (
+            <>
+              <canvas ref={roll} className="hum-wave hum-roll" width={900} height={140} />
+              <p className="muted key">听到 {notes.length} 个音：{notes.slice(0, 40).map((n, i) => <code key={i}>{noteName(n.midi)}</code>)}{notes.length > 40 ? '…' : ''}</p>
+              <div className="row">
+                <a className="btn" href={strudelLink(melodyCode)} target="_blank" rel="noreferrer">在 Strudel 里打开这段旋律</a>
+              </div>
+              <textarea id="hum-melody" className="hum-code" readOnly value={melodyCode} rows={Math.min(12, melodyCode.split('\n').length)} />
+            </>
+          )}
+
           <h3>换成 Strudel 代码</h3>
           <p className="muted">
             Strudel 是用代码写音乐的开源工具，在浏览器里就能跑，自带鼓机音色和混响、滤波、回声这些效果。下面是这段节奏的写法，可以直接在 Strudel 里打开，改音色、加效果，边改边听。
