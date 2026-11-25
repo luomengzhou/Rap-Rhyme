@@ -1,4 +1,5 @@
 import type { Analysis } from '../lib/analyze'
+import { genreOf } from '../lib/genres'
 import { barSeconds, REGULAR_TEMPLATE, type SectionTpl } from '../lib/styles'
 
 interface Props {
@@ -13,15 +14,6 @@ interface Props {
 }
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
-
-const BEAT_QUERY: Record<string, string> = {
-  'dark-trap': 'dark trap',
-  'boombap-playful': 'playful boom bap',
-  'dark-playful': 'dark eerie boom bap',
-  'brag-trap': 'hard trap',
-  chill: 'chill boom bap',
-  melodic: 'emotional melodic',
-}
 
 export function StructurePanel({ analysis, template, setTemplate, bpm, onInsert, onJump, beatId, onAsk }: Props) {
   const total = template.reduce((a, s) => a + s.bars, 0)
@@ -44,7 +36,7 @@ export function StructurePanel({ analysis, template, setTemplate, bpm, onInsert,
 
   const named = analysis.sections.filter((x) => x.name !== '未命名段落')
   const hasHook = named.some((x) => /hook|副歌|chorus/i.test(x.name))
-  const beatUrl = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(`${BEAT_QUERY[beatId] ?? 'boom bap'} type beat ${bpm} bpm`)
+  const beatUrl = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(`${genreOf(beatId)?.search ?? 'boom bap'} type beat ${bpm} bpm`)
   const steps: { done: boolean | null; title: string; body: React.ReactNode }[] = [
     { done: written >= 12, title: '先把想说的写出来', body: `不用管长短和押韵，写到十几行再说。现在 ${written} 行。` },
     {

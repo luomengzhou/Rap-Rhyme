@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { BEATS, engine } from '../lib/beats'
+import { beatOf, engine } from '../lib/beats'
+import { FAMILIES, GENRES, genreOf } from '../lib/genres'
 
 interface Props {
   beatId: string
@@ -14,22 +15,26 @@ interface Props {
 export function BeatBar({ beatId, setBeatId, bpm, setBpm, playing, toggle }: Props) {
   const [step, setStep] = useState(-1)
   useEffect(() => engine.onStep(setStep), [])
-  const beat = BEATS.find((b) => b.id === beatId) ?? BEATS[0]
+  const beat = beatOf(beatId)
+  const genre = genreOf(beat.id)
   return (
     <footer className="beatbar">
       <button className={'play' + (playing ? ' on' : '')} onClick={toggle} title={playing ? '停止' : '播放'}>
         {playing ? '■' : '▶'}
       </button>
       <select
-        value={beatId}
+        value={beat.id}
         onChange={(e) => {
-          const b = BEATS.find((x) => x.id === e.target.value)!
+          const b = beatOf(e.target.value)
           setBeatId(b.id)
           setBpm(b.bpm)
         }}
       >
-        {BEATS.map((b) => (
-          <option key={b.id} value={b.id}>{b.mood} · {b.name}</option>
+        <option value="click">节拍器 · 只要拍子</option>
+        {FAMILIES.map((f) => (
+          <optgroup key={f} label={f}>
+            {GENRES.filter((g) => g.family === f).map((g) => <option key={g.id} value={g.id}>{g.en} · {g.zh}</option>)}
+          </optgroup>
         ))}
       </select>
       <label className="bpm">
@@ -42,7 +47,7 @@ export function BeatBar({ beatId, setBeatId, bpm, setBpm, playing, toggle }: Pro
           <i key={i} className={(i % 4 === 0 ? 'beat ' : '') + (step >= 0 && step % 16 === i ? 'now' : '')} />
         ))}
       </div>
-      <span className="desc">{beat.desc}。示例 loop 由浏览器合成。</span>
+      <span className="desc" title={beat.desc}>{genre ? `${genre.zh}：${beat.desc}` : beat.desc}。鼓点骨架由浏览器合成，音色只是示意。</span>
     </footer>
   )
 }

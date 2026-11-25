@@ -323,7 +323,8 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
     const { suggestions } = splitReply(answer, Date.now().toString(36))
     setState({
       ...now,
-      chat: [...(now.chat ?? turns), { role: 'assistant', content: answer }],
+      // 回答来得太快时，最新状态里可能还没有刚发出的那句，这时用本地的
+      chat: [...(now.chat && now.chat.length >= turns.length ? now.chat : turns), { role: 'assistant', content: answer }],
       review: { ...now.review, suggestions: [...now.review.suggestions, ...suggestions] },
     })
   }
