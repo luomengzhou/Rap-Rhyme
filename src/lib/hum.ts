@@ -1,5 +1,5 @@
 // 哼唱分析：从一段“哒哒哒 咚咚 叮”的录音里切出每一下，估出速度，落到 16 分音符的格子上。
-// 只用音量和明亮度这类粗特征，目标是抓节奏型，不是识别音高。
+// 起点用频谱通量，明暗用频谱重心；目标是抓节奏型，不是识别音高。
 
 export type Kind = 'low' | 'mid' | 'high'
 export const KIND_NAME: Record<Kind, string> = { low: '咚', mid: '哒', high: '叮' }
@@ -28,42 +28,116 @@ const median = (a: number[]) => {
   return s[s.length >> 1]
 }
 
-/** 切出每一下 */
+/** 原地 FFT（长度必须是 2 的幂） */
+function fft(re: Float32Array, im: Float32Array) {
+  const n = re.length
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1
+    for (; j & bit; bit >>= 1) j ^= bit
+    j ^= bit
+    if (i < j) {
+      const t = re[i]; re[i] = re[j]; re[j] = t
+      const u = im[i]; im[i] = im[j]; im[j] = u
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = (-2 * Math.PI) / len
+    const wr = Math.cos(ang)
+    const wi = Math.sin(ang)
+    for (let i = 0; i < n; i += len) {
+      let cr = 1
+      let ci = 0
+      for (let k = 0; k < len / 2; k++) {
+        const a = i + k
+        const b = a + len / 2
+        const xr = re[b] * cr - im[b] * ci
+        const xi = re[b] * ci + im[b] * cr
+        re[b] = re[a] - xr; im[b] = im[a] - xi
+        re[a] += xr; im[a] += xi
+        const t = cr * wr - ci * wi
+        ci = cr * wi + ci * wr
+        cr = t
+      }
+    }
+  }
+}
+
+const BANDS = 28
+
+/**
+ * 切出每一下。做法是音频分析里通用的“频谱通量”：把声音按 10 毫秒一帧拆成 28 个频段，
+ * 哪一帧有频段突然变响，就是一下的起点。比只看总音量稳：连着哼、中间不断气的“哒哒哒”，
+ * 换音时总音量几乎不变，但频段会变。明亮度用频谱重心（声音能量集中在多高的频率）。
+ */
 export function detectHits(x: Float32Array, sr: number): Hit[] {
   const hop = Math.max(1, Math.round(sr * 0.01))
-  const win = hop * 2
-  const n = Math.max(0, Math.floor((x.length - win) / hop))
+  let N = 256
+  while (N < sr * 0.023) N <<= 1
+  const n = Math.max(0, Math.floor((x.length - N) / hop))
+  if (!n) return []
+  const hann = new Float32Array(N)
+  for (let i = 0; i < N; i++) hann[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1))
+  // 频段边界：60 Hz 到 8 kHz（或采样率的一半），按对数等分
+  const fTop = Math.min(8000, sr / 2)
+  const edge: number[] = []
+  for (let b = 0; b <= BANDS; b++) edge.push(Math.round(((60 * (fTop / 60) ** (b / BANDS)) / sr) * N))
+  for (let b = 1; b <= BANDS; b++) if (edge[b] <= edge[b - 1]) edge[b] = edge[b - 1] + 1
+
   const rms = new Float32Array(n)
-  const zcr = new Float32Array(n)
+  const cen = new Float32Array(n)
+  const band = new Float32Array(n * BANDS)
+  const re = new Float32Array(N)
+  const im = new Float32Array(N)
+  let peak = 0
+  let bandPeak = 0
   for (let i = 0; i < n; i++) {
     let e = 0
-    let z = 0
     const o = i * hop
-    for (let k = 0; k < win; k++) {
+    for (let k = 0; k < N; k++) {
       const v = x[o + k]
       e += v * v
-      // 相邻采样差的能量：声音越亮（频率越高）这个值相对越大，比数过零点稳
-      if (k) z += (v - x[o + k - 1]) ** 2
+      re[k] = v * hann[k]
+      im[k] = 0
     }
-    rms[i] = Math.sqrt(e / win)
-    zcr[i] = z
+    rms[i] = Math.sqrt(e / N)
+    peak = Math.max(peak, rms[i])
+    fft(re, im)
+    let num = 0
+    let den = 0
+    for (let b = 0; b < BANDS; b++) {
+      let s = 0
+      for (let k = edge[b]; k < edge[b + 1] && k < N / 2; k++) {
+        const p = re[k] * re[k] + im[k] * im[k]
+        s += p
+        num += p * k
+        den += p
+      }
+      const a = Math.sqrt(s)
+      band[i * BANDS + b] = a
+      bandPeak = Math.max(bandPeak, a)
+    }
+    cen[i] = den > 0 ? ((num / den) * sr) / N : 0
   }
-  let peak = 0
-  for (let i = 0; i < n; i++) peak = Math.max(peak, rms[i])
-  if (peak < 1e-4) return []
+  if (peak < 1e-4 || !bandPeak) return []
 
-  // 音量突然变大的地方就是一下的起点
+  // 每个频段压成对数响度（低于最响处 2% 的当作底噪），只算变响的部分
+  const lv = (i: number, b: number) => Math.log1p(100 * Math.max(0, band[i * BANDS + b] / bandPeak - 0.02))
   const rise = new Float32Array(n)
-  for (let i = 2; i < n; i++) rise[i] = Math.max(0, rms[i] - Math.min(rms[i - 1], rms[i - 2])) / peak
+  let top = 0
+  for (let i = 2; i < n; i++) {
+    let s = 0
+    for (let b = 0; b < BANDS; b++) s += Math.max(0, lv(i, b) - Math.max(lv(i - 1, b), lv(i - 2, b)))
+    rise[i] = s
+    top = Math.max(top, s)
+  }
+  if (!top) return []
+  for (let i = 0; i < n; i++) rise[i] /= top
+
   const raw: { i: number; rise: number }[] = []
   for (let i = 3; i < n - 1; i++) {
-    let local = 0
-    let c = 0
-    for (let k = Math.max(0, i - 15); k < Math.min(n, i + 15); k++) {
-      local += rise[k]
-      c++
-    }
-    const thr = Math.max(0.06, (local / c) * 2)
+    const near: number[] = []
+    for (let k = Math.max(0, i - 15); k < Math.min(n, i + 15); k++) near.push(rise[k])
+    const thr = Math.max(0.08, median(near) * 2 + 0.04)
     if (rise[i] < thr) continue
     if (rise[i] < rise[i - 1] || rise[i] < rise[i + 1]) continue
     raw.push({ i, rise: rise[i] })
@@ -82,13 +156,17 @@ export function detectHits(x: Float32Array, sr: number): Hit[] {
     for (let k = i; k < Math.min(n, i + 6); k++) s = Math.max(s, rms[k])
     let b = 0
     let c = 0
-    // 明亮度：这一下的“平均频率”，按能量算，不容易被底噪带偏
-    for (let k = i; k < Math.min(n, i + 7); k++) {
-      b += zcr[k]
-      c += rms[k] * rms[k] * win
+    // 明亮度：这一下头 60 毫秒的频谱重心，按能量加权，不容易被底噪带偏
+    for (let k = i; k < Math.min(n, i + 6); k++) {
+      const w = rms[k] * rms[k]
+      b += cen[k] * w
+      c += w
     }
-    return { time: Math.max(0, (i - 1) * hop) / sr, strength: s / peak, bright: (sr / (2 * Math.PI)) * Math.acos(Math.max(-1, 1 - b / Math.max(c, 1e-12) / 2)), kind: 'mid' as Kind, accent: false }
+    // 一帧的窗口有 N 个采样，起点大约落在窗口后半段
+    const time = Math.max(0, i * hop + N * 0.75 - hop) / sr
+    return { time, strength: s / peak, bright: c > 0 ? b / c : 0, kind: 'mid' as Kind, accent: false }
   }).filter((h) => h.strength > 0.08)
+  if (!hits.length) return []
 
   // 咚 / 哒 / 叮：只和这段录音里的其他几下比。明暗差不多就都算“哒”；
   // 分成两堆时闷的是“咚”、亮的是“哒”；中间还有一堆时最亮的才算“叮”
@@ -223,4 +301,39 @@ export function describe(steps: Step[], bpm: number): string {
     return `第${i + 1}小节 ${cells.join('').replace(/(.{4})/g, '$1 ').trim()}`
   })
   return `速度约 ${bpm} BPM，4/4 拍，每小节 16 格（每 4 格一拍）。d=闷的低音“咚”，t=中间的“哒”，i=亮的“叮”，大写是重音，. 是空。\n${lines.join('\n')}`
+}
+
+/** Strudel（strudel.cc，用代码写音乐的开源工具）里能选的几套鼓机音色 */
+export const STRUDEL_BANKS: [string, string][] = [
+  ['', '默认鼓组'],
+  ['RolandTR808', 'TR-808（trap、老派电子）'],
+  ['RolandTR909', 'TR-909（house、舞曲）'],
+  ['AkaiLinn', 'Linn（80 年代流行）'],
+]
+
+/** 写成 Strudel 代码：咚=bd 底鼓，哒=sd 军鼓，叮=hh 镲；重音用 gain 加大音量 */
+export function toStrudel(steps: Step[], bpm: number, bank = ''): string {
+  const name: Record<Kind, string> = { low: 'bd', mid: 'sd', high: 'hh' }
+  const bars = toBars(steps)
+  const group = (cells: string[]) => cells.join(' ').replace(/((?:\S+ ){3}\S+) /g, '$1  ')
+  const seq = (f: (s: Step | undefined) => string) =>
+    bars.map((b) => `[${group(Array.from({ length: 16 }, (_, i) => f(b.find((s) => s.step === i))))}]`)
+  const wrap = (rows: string[]) => (!rows.length ? '~' : rows.length > 1 ? `<\n  ${rows.join('\n  ')}\n>` : rows[0].slice(1, -1))
+  const lines = [
+    `// 哼唱转出来的节奏，约 ${bpm} BPM。每小节 16 格，~ 是空`,
+    `setcpm(${bpm}/4)`,
+    `s(\`${wrap(seq((s) => (s ? name[s.kind] : '~')))}\`)`,
+  ]
+  if (steps.some((s) => s.accent)) lines.push(`  .gain(\`${wrap(seq((s) => (s?.accent ? '1.3' : '.9')))}\`)`)
+  if (bank) lines.push(`  .bank("${bank}")`)
+  lines.push('  // 想换效果就去掉下面某一行前面的 //', '  // .room(.4)      // 混响，空间感', '  // .lpf(900)      // 低通，变闷', '  // .delay(.25)    // 回声', '  // .speed(.8)     // 音调放低')
+  return lines.join('\n')
+}
+
+/** 在 strudel.cc 里直接打开这段代码的链接（代码放在 # 后面，不会发给服务器） */
+export function strudelLink(code: string): string {
+  const bytes = new TextEncoder().encode(code)
+  let bin = ''
+  bytes.forEach((b) => (bin += String.fromCharCode(b)))
+  return 'https://strudel.cc/#' + encodeURIComponent(btoa(bin))
 }

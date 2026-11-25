@@ -28,3 +28,16 @@ describe('网站里的 Claude', () => {
     expect(input.at(-1)?.content).toBe('帮我看看')
   })
 })
+
+import { locateGloss } from './ai'
+describe('划句翻译', () => {
+  const text = 'I won\'t lose myself, 距離とっても\n纏わりついて 棲みつく desire\n\nI just hold you now\n温もりなのに'
+  it('找到划中的几句在第几行', () => {
+    expect(locateGloss(text, '纏わりついて 棲みつく desire\n\nI just hold you now')).toEqual({ src: '纏わりついて 棲みつく desire\nI just hold you now', at: 3 })
+    expect(locateGloss(text, '  lose myself, 距離 ')).toEqual({ src: 'lose myself, 距離', at: 0 })
+  })
+  it('不在原文里的不算', () => {
+    expect(locateGloss(text, '别的文字')).toBeNull()
+    expect(locateGloss(text, '  ')).toBeNull()
+  })
+})

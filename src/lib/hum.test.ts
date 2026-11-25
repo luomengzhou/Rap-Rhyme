@@ -58,3 +58,60 @@ d('哼唱分析', () => {
     expect(detectHits(new Float32Array(SR), SR)).toEqual([])
   })
 })
+
+d('哼唱分析：更像人声的情况', () => {
+  // 连着哼不断气：一条 0.2 秒一换的音，音量几乎不变，只是每次换音有个很短的凹口和音高变化
+  const legato = () => {
+    const x = new Float32Array(SR * 3)
+    const notes = [196, 220, 196, 262, 220, 196, 247, 196]
+    let ph = 0
+    for (let i = 0; i < x.length; i++) {
+      const t = i / SR - 0.3
+      if (t < 0 || t >= notes.length * 0.2) continue
+      const k = Math.floor(t / 0.2)
+      const into = t - k * 0.2
+      // 结尾 40 毫秒淡出，人声不会戛然而止
+      const out = Math.min(1, (notes.length * 0.2 - t) / 0.04)
+      const env = 0.5 * out * (1 - 0.35 * Math.exp(-into / 0.012))
+      ph += (2 * Math.PI * notes[k]) / SR
+      x[i] = env * (Math.sin(ph) + 0.5 * Math.sin(2 * ph) + 0.3 * Math.sin(3 * ph) + 0.2 * Math.sin(5 * ph))
+    }
+    return x
+  }
+  it('中间不断气的“哒哒哒”也能切开', () => {
+    const hits = detectHits(legato(), SR)
+    expect(hits).toHaveLength(8)
+    hits.forEach((h, i) => expect(Math.abs(h.time - (0.3 + i * 0.2))).toBeLessThan(0.04))
+  })
+  it('咚 哒 叮 三种都分得出', () => {
+    const x = new Float32Array(SR * 3)
+    const kinds = ['low', 'mid', 'high', 'low', 'mid', 'high'] as const
+    const f = { low: 100, mid: 700, high: 3200 }
+    kinds.forEach((kind, j) => {
+      const o = Math.round((0.3 + j * 0.3) * SR)
+      for (let k = 0; k < 0.1 * SR; k++) x[o + k] += 0.5 * Math.exp(-k / (0.03 * SR)) * Math.sin((2 * Math.PI * f[kind] * k) / SR)
+    })
+    expect(detectHits(x, SR).map((h) => h.kind)).toEqual([...kinds])
+  })
+})
+
+d('Strudel 写法', () => {
+  const steps: Step[] = [
+    { step: 0, kind: 'low', accent: true }, { step: 4, kind: 'mid', accent: false }, { step: 10, kind: 'low', accent: false }, { step: 12, kind: 'mid', accent: false },
+    { step: 16, kind: 'low', accent: true }, { step: 31, kind: 'high', accent: false },
+  ]
+  it('每小节 16 格，带速度、重音和鼓机', async () => {
+    const { toStrudel, strudelLink } = await import('./hum')
+    const code = toStrudel(steps, 92, 'RolandTR808')
+    expect(code).toContain('setcpm(92/4)')
+    expect(code).toContain('[bd ~ ~ ~  sd ~ ~ ~  ~ ~ bd ~  sd ~ ~ ~]')
+    expect(code).toContain('[bd ~ ~ ~  ~ ~ ~ ~  ~ ~ ~ ~  ~ ~ ~ hh]')
+    expect(code).toContain('[1.3 .9 .9 .9  ')
+    expect(code).toContain('.bank("RolandTR808")')
+    const one = toStrudel(steps.slice(0, 4).map((s) => ({ ...s, accent: false })), 92)
+    expect(one).toContain('s(`bd ~ ~ ~  sd ~ ~ ~  ~ ~ bd ~  sd ~ ~ ~`)')
+    expect(one).not.toContain('.gain')
+    const hash = strudelLink(code).split('#')[1]
+    expect(new TextDecoder().decode(Uint8Array.from(atob(decodeURIComponent(hash)), (c) => c.charCodeAt(0)))).toBe(code)
+  })
+})

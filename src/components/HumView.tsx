@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { BEATS, engine } from '../lib/beats'
-import { describe, detectHits, estimateBpm, KIND_NAME, PATTERNS, quantize, rank, type Hit, type Kind, type Step } from '../lib/hum'
+import { describe, detectHits, estimateBpm, KIND_NAME, PATTERNS, quantize, rank, STRUDEL_BANKS, strudelLink, toStrudel, type Hit, type Kind, type Step } from '../lib/hum'
 import { useStored } from '../lib/store'
 
 interface Props {
@@ -35,6 +35,9 @@ export function HumView({ onAsk }: Props) {
   const [sounds, setSounds] = useStored('rr.humSounds', { low: 'kick', mid: 'snare', high: 'bell' })
   const [flows, setFlows] = useStored<SavedFlow[]>('rr.flows', [])
   const [savedMsg, setSavedMsg] = useState('')
+  const [bank, setBank] = useStored('rr.humBank', '')
+  const [copied, setCopied] = useState('')
+  const codeBox = useRef<HTMLTextAreaElement>(null)
   const file = useRef<HTMLInputElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
 
@@ -97,7 +100,7 @@ export function HumView({ onAsk }: Props) {
       setRec(mr)
       setStatus('正在录，哼完点“停”。')
     } catch {
-      setStatus('这里录不了音（页面没有麦克风权限）。用手机或电脑的语音备忘录录好，再点“选择录音文件”传上来。')
+      setStatus('这个页面拿不到麦克风：claude.ai 不把麦克风开放给它里面的网页，不是你这边能设置的。想直接录，用 GitHub Pages 上的那一份（同一个网站，地址在仓库首页）；或者先用语音备忘录录好，点“选择录音文件”传上来。')
     }
   }
 
@@ -145,6 +148,7 @@ export function HumView({ onAsk }: Props) {
     ;[...p.snare].forEach((c, i) => c === 'x' && one.push({ step: i, kind: 'mid', accent: false }))
     void engine.playSteps(bpm, [...one, ...one.map((s) => ({ ...s, step: s.step + 16 }))], sounds)
   }
+  const code = useMemo(() => toStrudel(steps, bpm, bank), [steps, bpm, bank])
   const bars = Math.max(1, Math.min(4, Math.ceil(((steps.at(-1)?.step ?? 0) + 1) / 16)))
 
   return (
@@ -237,6 +241,30 @@ export function HumView({ onAsk }: Props) {
             ))}
           </ul>
           <p className="muted">对照的是几种通用骨架和网站自带的示例 beat，只比落点的位置。相似度低于一半时，说明你哼的更像一句旋律或 flow，而不是鼓点。</p>
+          <h3>换成 Strudel 代码</h3>
+          <p className="muted">
+            Strudel 是用代码写音乐的开源工具，在浏览器里就能跑，自带鼓机音色和混响、滤波、回声这些效果。下面是这段节奏的写法，可以直接在 Strudel 里打开，改音色、加效果，边改边听。
+          </p>
+          <div className="row">
+            <label className="check">
+              鼓机
+              <select id="hum-bank" value={bank} onChange={(e) => setBank(e.target.value)}>
+                {STRUDEL_BANKS.map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+              </select>
+            </label>
+            <a className="btn primary" href={strudelLink(code)} target="_blank" rel="noreferrer">在 Strudel 里打开</a>
+            <button
+              onClick={() => {
+                codeBox.current?.select()
+                navigator.clipboard?.writeText(code).then(() => setCopied('复制好了'), () => setCopied('已选中，按 Ctrl/⌘+C 复制'))
+              }}
+            >
+              复制代码
+            </button>
+            {copied && <span className="muted">{copied}</span>}
+          </div>
+          <textarea ref={codeBox} id="hum-strudel" className="hum-code" readOnly value={code} rows={Math.min(16, code.split('\n').length)} />
+
           <div className="row">
             <button
               disabled={!steps.length}

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildInput, errorText, getSample, splitReply, translatePrompt, type Material, type Sample, type Turn } from '../lib/ai'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { buildInput, errorText, getSample, GLOSS_MAX_LINES, glossPrompt, locateGloss, splitReply, translatePrompt, type Material, type Sample, type Turn } from '../lib/ai'
 import { applyReview, diffLines, parseReview, type Review, type Status } from '../lib/review'
 
 export interface ReviewState {
@@ -16,6 +16,9 @@ interface Props {
   text: string
   state: ReviewState | undefined
   setState: (s: ReviewState | undefined) => void
+  /** 收藏的素材，所有草稿共用 */
+  materials: Material[]
+  setMaterials: Dispatch<SetStateAction<Material[]>>
   onSaveAsNew: (text: string) => void
   /** 草稿还是空的时候，直接把提纲写进去 */
   onWrite: (text: string) => void
@@ -58,16 +61,41 @@ interface CardProps {
   onToggle: () => void
   onEdit?: () => void
   onTranslate?: () => void
-  /** 正在翻译时已经写出来的部分 */
+  /** 正在讲解时已经写出来的部分 */
   live?: string | null
+  /** 翻译划出来的几句 */
+  onGloss?: (src: string, at: number) => void
+  onDropGloss?: (at: number) => void
+  /** 正在翻译的那几句：最后一行的行号和已经写出来的部分 */
+  glossing?: { at: number; text: string } | null
 }
 
-function MaterialCard({ m, saved, onToggle, onEdit, onTranslate, live }: CardProps) {
+/** 去掉 Claude 偶尔带上的 Markdown 星号、井号，段落名单独加粗 */
+function Plain({ text }: { text: string }) {
+  return (
+    <>
+      {text.split('\n').map((l, i) => {
+        const head = /^\s*(\*\*.+\*\*|#+\s.+)\s*$/.test(l)
+        const clean = l.replace(/\*\*/g, '').replace(/^\s*#+\s*/, '')
+        return clean.trim() ? <div key={i} className={head ? 'mat-h' : undefined}>{clean}</div> : <div key={i} className="mat-gap" />
+      })}
+    </>
+  )
+}
+
+function MaterialCard({ m, saved, onToggle, onEdit, onTranslate, live, onGloss, onDropGloss, glossing }: CardProps) {
   const tr = live ?? m.translation ?? ''
-  const src = m.text.split('\n')
-  const dst = tr.split('\n')
-  // 行数对得上就一行原文一行译文地排，对不上就整段放在下面
-  const paired = tr && live == null && src.length === dst.length
+  const lines = m.text.split('\n')
+  const box = useRef<HTMLDivElement>(null)
+  const [sel, setSel] = useState<{ src: string; at: number; n: number } | null>(null)
+  const pick = () => {
+    const s = window.getSelection()
+    const el = box.current
+    if (!s || s.isCollapsed || !el || !s.anchorNode || !s.focusNode || !el.contains(s.anchorNode) || !el.contains(s.focusNode)) return setSel(null)
+    const hit = locateGloss(m.text, s.toString())
+    setSel(hit ? { ...hit, n: hit.src.split('\n').length } : null)
+  }
+  const glossAt = (i: number) => (glossing?.at === i ? { zh: glossing.text, live: true } : m.glosses?.find((g) => g.at === i))
   return (
     <article className={`mat${saved ? ' on' : ''}`}>
       <div className="sug-head">
@@ -75,19 +103,49 @@ function MaterialCard({ m, saved, onToggle, onEdit, onTranslate, live }: CardPro
         <b>{m.title}</b>
       </div>
       {m.source && <div className="mat-src">{m.source}</div>}
-      {m.text && !paired && <p className="mat-text">{m.text}</p>}
-      {paired && (
-        <div className="mat-text mat-pair">
-          {src.map((l, i) => (l.trim() ? <div key={i}><span>{l}</span><em>{dst[i]}</em></div> : <br key={i} />))}
+      {m.text && (
+        <div className="mat-text" ref={box} onMouseUp={pick} onKeyUp={pick}>
+          {lines.map((l, i) => {
+            const g = glossAt(i)
+            return (
+              <div key={i}>
+                {l.trim() ? <div>{l}</div> : <div className="mat-gap" />}
+                {g && (
+                  <div className="mat-gloss">
+                    {g.zh ? <Plain text={g.zh} /> : <span className="muted">正在翻译…</span>}
+                    {onDropGloss && !('live' in g) && <button className="link" title="去掉这段翻译" onClick={() => onDropGloss(i)}>×</button>}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
-      {tr && !paired && <p className="mat-text mat-tr">{tr}</p>}
-      {live === '' && <p className="muted">正在翻译…</p>}
+      {onGloss && m.text.trim() && (
+        <div className="row tight mat-pick">
+          {sel ? (
+            sel.n > GLOSS_MAX_LINES ? (
+              <span className="muted">划了 {sel.n} 行，一次最多 {GLOSS_MAX_LINES} 行，少划几句。</span>
+            ) : (
+              <button className="primary" disabled={!!glossing} onClick={() => { onGloss(sel.src, sel.at); setSel(null); window.getSelection()?.removeAllRanges() }}>翻译划中的这 {sel.n} 行</button>
+            )
+          ) : (
+            <span className="muted">用鼠标划几句原文，就翻译那几句，译文会夹在原文下面。</span>
+          )}
+        </div>
+      )}
+      {tr && (
+        <details className="mat-tr" open={live != null}>
+          <summary>整段大意</summary>
+          <Plain text={tr} />
+        </details>
+      )}
+      {live === '' && <p className="muted">正在读…</p>}
       {m.use && <p>{m.use}</p>}
       <div className="row tight">
         <button className={saved ? 'primary' : ''} onClick={onToggle}>{saved ? (onEdit ? '取消收藏' : '已收藏') : '收藏'}</button>
         {onEdit && <button className="link" onClick={onEdit}>改</button>}
-        {onTranslate && m.text.trim() && <button className="link" disabled={live != null} onClick={onTranslate}>{m.translation ? '重新翻译' : '翻译成中文'}</button>}
+        {onTranslate && m.text.trim() && <button className="link" disabled={live != null} onClick={onTranslate}>{m.translation ? '重新讲一遍大意' : '讲讲整段大意'}</button>}
         <a className="right" href={searchUrl(m)} target="_blank" rel="noreferrer">搜原文核对</a>
       </div>
     </article>
@@ -103,21 +161,21 @@ function inline(a: string, b: string): [string, string, string, string, string] 
   return [a.slice(0, p), a.slice(p, a.length - s), b.slice(p, b.length - s), a.slice(a.length - s), b.slice(0, p)]
 }
 
-export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite, facts, ask, clearAsk }: Props) {
+export function ReviewView({ title, text, state, setState, materials: saved, setMaterials, onSaveAsNew, onWrite, facts, ask, clearAsk }: Props) {
   const cur: ReviewState = state ?? { review: { title: `${title || '未命名'} · 改稿`, suggestions: [] }, accepted: [], choice: {}, chat: [] }
   const { review, accepted, choice } = cur
   const chat = cur.chat ?? []
-  const saved = cur.materials ?? []
   const idea = text.split('\n').filter((l) => l.trim() && !/^\s*[[【（(]/.test(l)).length < 4
   const matNotes = saved.length
-    ? '\n作者为这份草稿收藏的素材（可以直接引用、接着聊）：\n' + saved.slice(0, 20).map((m) => `- [${m.kind}] ${m.title}${m.source ? '（' + m.source + '）' : ''}：${m.text.slice(0, 600)}${m.use ? ' 用法：' + m.use : ''}`).join('\n')
+    ? '\n作者收藏的素材（可以直接引用、接着聊）：\n' + saved.slice(0, 20).map((m) => `- [${m.kind}] ${m.title}${m.source ? '（' + m.source + '）' : ''}：${m.text.slice(0, 600)}${m.use ? ' 用法：' + m.use : ''}`).join('\n')
     : ''
   const [matForm, setMatForm] = useState<Material | null>(null)
   const saveMat = () => {
     if (!matForm || !matForm.title.trim()) return
     const prev = saved.find((x) => x.id === matForm.id)
-    const m = { ...matForm, title: matForm.title.trim(), translation: prev && prev.text !== matForm.text ? undefined : matForm.translation }
-    setState({ ...cur, materials: saved.some((x) => x.id === m.id) ? saved.map((x) => (x.id === m.id ? m : x)) : [m, ...saved] })
+    const changed = !!prev && prev.text !== matForm.text
+    const m = { ...matForm, title: matForm.title.trim(), translation: changed ? undefined : matForm.translation, glosses: changed ? undefined : matForm.glosses }
+    setMaterials((all) => (all.some((x) => x.id === m.id) ? all.map((x) => (x.id === m.id ? m : x)) : [m, ...all]))
     setMatForm(null)
   }
   const [trans, setTrans] = useState<{ id: string; text: string } | null>(null)
@@ -134,11 +192,27 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
     }
     setTrans(null)
     if (!out) return
-    const now = latest.current
-    setState({ ...now, materials: (now.materials ?? []).map((x) => (x.id === m.id ? { ...x, translation: out } : x)) })
+    setMaterials((all) => all.map((x) => (x.id === m.id ? { ...x, translation: out } : x)))
   }
+  const [glossing, setGlossing] = useState<{ id: string; at: number; text: string } | null>(null)
+  const gloss = async (m: Material, src: string, at: number) => {
+    if (!sample || glossing || trans) return
+    setGlossing({ id: m.id, at, text: '' })
+    setChatError('')
+    let out = ''
+    try {
+      const res = await sample(glossPrompt(m, src), { cache: false, onText: ({ text: t }) => setGlossing({ id: m.id, at, text: t }) })
+      out = res.text.trim()
+    } catch (e) {
+      setChatError(errorText((e as { code?: string }).code))
+    }
+    setGlossing(null)
+    if (!out) return
+    setMaterials((all) => all.map((x) => (x.id === m.id ? { ...x, glosses: [...(x.glosses ?? []).filter((g) => g.at !== at), { src, zh: out, at }] } : x)))
+  }
+  const dropGloss = (m: Material, at: number) => setMaterials((all) => all.map((x) => (x.id === m.id ? { ...x, glosses: (x.glosses ?? []).filter((g) => g.at !== at) } : x)))
   const toggleMat = (m: Material) =>
-    setState({ ...cur, materials: saved.some((x) => x.title === m.title) ? saved.filter((x) => x.title !== m.title) : [...saved, { ...m, id: 'm' + Math.random().toString(36).slice(2, 10) }] })
+    setMaterials((all) => (all.some((x) => x.title === m.title) ? all.filter((x) => x.title !== m.title) : [...all, { ...m, id: 'm' + Math.random().toString(36).slice(2, 10) }]))
 
   const [tab, setTab] = useState<'chat' | 'list' | 'mats'>('chat')
   const [error, setError] = useState('')
@@ -392,7 +466,7 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
 
         {tab === 'mats' && (
           <div className="pane">
-            <p className="muted">这份草稿收藏的典故、诗词、意象和参考歌曲。内容是 Claude 凭记忆给的，用之前点“搜原文核对”确认一下。</p>
+            <p className="muted">收藏的典故、诗词、意象和参考歌曲，所有草稿和版本共用一份。Claude 凭记忆给的内容，用之前点“搜原文核对”确认一下。</p>
             {matForm ? (
               <form className="mat-form" onSubmit={(e) => { e.preventDefault(); saveMat() }}>
                 <div className="row tight">
@@ -416,7 +490,7 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
             )}
             {saved.length === 0 && !matForm && <p className="muted">还没有收藏。可以和 Claude 聊主题让它给素材，也可以把自己查到的原文、歌词加进来。</p>}
             <div className="mats">
-              {saved.map((m) => <MaterialCard key={m.id} m={m} saved onToggle={() => toggleMat(m)} onEdit={() => setMatForm(m)} onTranslate={sample ? () => void translate(m) : undefined} live={trans?.id === m.id ? trans.text : null} />)}
+              {saved.map((m) => <MaterialCard key={m.id} m={m} saved onToggle={() => toggleMat(m)} onEdit={() => setMatForm(m)} onTranslate={sample ? () => void translate(m) : undefined} live={trans?.id === m.id ? trans.text : null} onGloss={sample ? (src, at) => void gloss(m, src, at) : undefined} onDropGloss={(at) => dropGloss(m, at)} glossing={glossing?.id === m.id ? glossing : null} />)}
               {chatError && <p className="review-error">{chatError}</p>}
             </div>
           </div>

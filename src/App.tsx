@@ -13,6 +13,7 @@ import { RhymePanel } from './components/RhymePanel'
 import { StructurePanel } from './components/StructurePanel'
 import { RefsView, type SongRef } from './components/RefsView'
 import { ReviewView, type ReviewState } from './components/ReviewView'
+import type { Material } from './lib/ai'
 import { TheoryView } from './components/TheoryView'
 
 interface Draft {
@@ -23,6 +24,20 @@ interface Draft {
 
 type View = 'write' | 'review' | 'flow' | 'hum' | 'refs' | 'theory'
 type Side = 'check' | 'rhyme' | 'structure'
+
+/** 把以前跟着各份草稿存的素材收到一起，同一条只留一份 */
+function gatherMaterials(reviews: Record<string, ReviewState>): Material[] {
+  const seen = new Set<string>()
+  return Object.values(reviews)
+    .flatMap((r) => r?.materials ?? [])
+    .filter((m) => {
+      const k = m.title + '\n' + m.text
+      if (seen.has(m.id) || seen.has(k)) return false
+      seen.add(m.id)
+      seen.add(k)
+      return true
+    })
+}
 
 const newDraft = (title = '新草稿'): Draft => ({ id: Math.random().toString(36).slice(2, 10), title, text: '' })
 const HAN = /^[一-鿿]{1,6}$/
@@ -41,6 +56,8 @@ export default function App() {
   const [template, setTemplate] = useStored<SectionTpl[]>('rr.template', REGULAR_TEMPLATE)
   const [refs, setRefs] = useStored<SongRef[]>('rr.refs', [])
   const [reviews, setReviews] = useStored<Record<string, ReviewState>>('rr.reviews', {})
+  // 素材所有草稿共用。以前是跟着每份草稿存的，第一次打开时把它们收到一起
+  const [materials, setMaterials] = useStored<Material[]>('rr.materials', gatherMaterials(reviews))
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState<RhymeIndex | null>(null)
   const [playing, setPlaying] = useState(false)
@@ -222,6 +239,8 @@ export default function App() {
           ask={ask}
           clearAsk={() => setAsk('')}
           state={reviews[draft.id]}
+          materials={materials}
+          setMaterials={setMaterials}
           setState={(s) => {
             const next = { ...reviews }
             if (s) next[draft.id] = s

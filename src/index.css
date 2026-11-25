@@ -264,10 +264,13 @@ a { color: var(--accent); }
 .mat-form .row input { flex: 1; min-width: 0; }
 .mat-form textarea { line-height: 1.6; resize: vertical; }
 .mat-text { white-space: pre-wrap; }
-.mat-pair > div { margin: 0 0 8px; }
-.mat-pair span { display: block; color: var(--dim); font-size: 13px; }
-.mat-pair em { display: block; font-style: normal; color: var(--ink); }
-.mat-tr { border-left-color: var(--accent); }
+.mat-gap { height: .8em; }
+.mat-gloss { position: relative; margin: 4px 0 10px; padding: 6px 28px 6px 10px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--ink); font-size: 14px; user-select: none; white-space: normal; }
+.mat-gloss button { position: absolute; top: 2px; right: 6px; color: var(--dim); }
+.mat-pick { margin: 6px 0; font-size: 13px; }
+.mat-tr { margin: 8px 0; border-left: 2px solid var(--accent); padding-left: 10px; color: #c9ccd6; font-size: 14px; }
+.mat-tr summary { cursor: pointer; color: var(--dim); font-size: 13px; }
+.mat-h { font-weight: 700; color: var(--ink); margin-top: 6px; }
 .hum { max-width: 980px; }
 .hum-wave { width: 100%; height: 90px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin: 10px 0 4px; display: block; }
 .hum audio { height: 34px; }
@@ -279,3 +282,6 @@ a { color: var(--accent); }
 .hum-match li b { margin-right: 8px; }
 .hum-match li .link { margin-left: 8px; }
 .hum-match p { margin: 6px 0 0; color: var(--dim); line-height: 1.6; }
+a.btn { display: inline-block; text-decoration: none; color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
+a.btn.primary { background: var(--accent); border-color: var(--accent); color: #06202e; font-weight: 600; }
+.hum-code { width: 100%; margin-top: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; line-height: 1.6; white-space: pre; overflow-x: auto; resize: vertical; }
