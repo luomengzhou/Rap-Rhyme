@@ -21,6 +21,13 @@ describe('韵脚本', () => {
     const groups = [g(['不错', '堕落']), g(['天空'])]
     expect(matchGroups(groups, '执着', 'strict')).toEqual([groups[0]])
   })
+  it('查词：英文有读音时按最后两个元音比', () => {
+    const says: Record<string, string> = { problem: 'P R AA1 B L AH0 M', gotten: 'G AA1 T AH0 N', late: 'L EY1 T' }
+    const sound = (t: string) => says[t.toLowerCase()]?.split(' ') ?? null
+    const groups = [g(['gotten', 'zzz']), g(['late'])]
+    expect(matchGroups(groups, 'problem', 'strict', sound)).toEqual([groups[0]])
+    expect(matchGroups(groups, 'problem', 'strict')).toEqual([])
+  })
   it('上色：整词才算，长短语优先', () => {
     const segs = markLine('The alphabet and Alpha, beta one', [g(['alpha']), g(['beta one', 'one'])])
     expect(segs.filter((s) => s.group >= 0)).toEqual([{ text: 'Alpha', group: 0 }, { text: 'beta one', group: 1 }])

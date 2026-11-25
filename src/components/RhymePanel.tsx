@@ -1,4 +1,5 @@
-import { useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { enKey, findEn, isEnglish, loadEn, pronounce, syllables, type EnIndex } from '../lib/en'
 import { addItems, matchGroups, parseItems, sourceOf, type RhymeGroup } from '../lib/book'
 import { findRhymes, toSyls, type Mode, type RhymeIndex } from '../lib/rhyme'
 import { colorOf, N_LABEL } from '../lib/palette'
@@ -64,8 +65,15 @@ function GroupBox({ g, setGroups, onPick, onAsk }: BoxProps) {
 
 const SHOW = 240
 
+interface Shown {
+  w: string
+  /** 读音，鼠标停上去能看到 */
+  title: string
+  looseOnly: boolean
+  rare: boolean
+}
+
 export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, setBlocked, liked, setLiked, onPick, groups, setGroups, onAsk }: Props) {
-  const mine = useMemo(() => matchGroups(groups, query, mode), [groups, query, mode])
   const [draft, setDraft] = useState({ items: '', song: '', artist: '' })
   const addGroup = () => {
     const items = parseItems(draft.items)
@@ -79,21 +87,43 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
   const [length, setLength] = useState(0)
   const [all, setAll] = useState(false)
 
-  const syls = useMemo(() => toSyls(query), [query])
-  const maxN = Math.min(4, syls.length)
+  const en = isEnglish(query)
+  const [enIdx, setEnIdx] = useState<EnIndex | null>(null)
+  const [enFail, setEnFail] = useState(false)
+  useEffect(() => {
+    if (!en || enIdx) return
+    let live = true
+    loadEn(import.meta.env.BASE_URL).then((i) => live && setEnIdx(i), () => live && setEnFail(true))
+    return () => { live = false }
+  }, [en, enIdx])
+  const said = useMemo(() => (en && enIdx ? pronounce(enIdx, query) : null), [en, enIdx, query])
+
+  const syls = useMemo(() => (en ? [] : toSyls(query)), [en, query])
+  const size = en ? (said && !said.unknown.length ? syllables(said.ph) : 0) : syls.length
+  const maxN = Math.min(4, size)
   const useN = Math.min(n, Math.max(1, maxN))
   const blockedSet = useMemo(() => new Set(blocked), [blocked])
   const likedSet = useMemo(() => new Set(liked), [liked])
 
-  const { hits, counts } = useMemo(() => {
+  const { hits, counts } = useMemo((): { hits: Shown[]; counts: number[] } => {
+    const byLiked = (a: Shown, b: Shown) => Number(likedSet.has(b.w)) - Number(likedSet.has(a.w))
+    if (en) {
+      if (!enIdx || !size) return { hits: [], counts: [0, 0, 0, 0] }
+      const base = { mode, showRare, blocked: blockedSet }
+      const counts = [1, 2, 3, 4].map((k) => (k <= maxN ? findEn(enIdx, query, { ...base, n: k }).length : 0))
+      const hits = findEn(enIdx, query, { ...base, n: useN }).map(({ word, looseOnly }) => ({ w: word.w, title: word.ph.join(' '), looseOnly, rare: word.tier === 2 }))
+      return { hits: hits.sort(byLiked), counts }
+    }
     if (!index || !syls.length) return { hits: [], counts: [0, 0, 0, 0] }
     const base = { mode, sameTone, showRare, length, blocked: blockedSet }
     const counts = [1, 2, 3, 4].map((k) => (k <= maxN ? findRhymes(index, query, { ...base, n: k }).length : 0))
-    const hits = findRhymes(index, query, { ...base, n: useN })
-    hits.sort((a, b) => Number(likedSet.has(b.word.w)) - Number(likedSet.has(a.word.w)))
-    return { hits, counts }
-  }, [index, query, syls.length, mode, sameTone, showRare, length, blockedSet, likedSet, useN, maxN])
+    const hits = findRhymes(index, query, { ...base, n: useN }).map(({ word, looseOnly }) => ({ w: word.w, title: word.syls.map((x) => x.py.replace('v', 'ü') + (x.tone || '')).join(' '), looseOnly, rare: word.tier === 2 }))
+    return { hits: hits.sort(byLiked), counts }
+  }, [en, enIdx, size, index, query, syls.length, mode, sameTone, showRare, length, blockedSet, likedSet, useN, maxN])
 
+  // 记过的韵组：中文按韵比；英文词典加载好后按最后两个元音比
+  const sound = useMemo(() => (enIdx ? (t: string) => { const p = pronounce(enIdx, t); return p.ph.length && !p.unknown.length ? p.ph : null } : undefined), [enIdx])
+  const mine = useMemo(() => matchGroups(groups, query, mode, sound), [groups, query, mode, sound])
   const shown = all ? hits : hits.slice(0, SHOW)
   const tail = syls.slice(-useN)
 
@@ -102,7 +132,7 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
       <input
         className="q"
         value={query}
-        placeholder="输入一个词，比如 不错"
+        placeholder="输入一个词，中文英文都行，比如 不错、problem"
         onChange={(e) => {
           setQuery(e.target.value)
           setAll(false)
@@ -120,12 +150,12 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
       </div>
       <div className="row opts">
         <div className="seg small">
-          <button className={mode === 'strict' ? 'on' : ''} onClick={() => setMode('strict')} title="按实际听感：主要元音和韵尾都相同才算">严格</button>
-          <button className={mode === 'loose' ? 'on' : ''} onClick={() => setMode('loose')} title="再合并 en/eng、in/ing、e/o 等相近的韵，结果里会标出来">含宽押</button>
+          <button className={mode === 'strict' ? 'on' : ''} onClick={() => setMode('strict')} title={en ? '元音和它后面的辅音都一样才算' : '按实际听感：主要元音和韵尾都相同才算'}>严格</button>
+          <button className={mode === 'loose' ? 'on' : ''} onClick={() => setMode('loose')} title={en ? '只要元音一样就算，辅音不管。说唱里最常用，结果里会标出来' : '再合并 en/eng、in/ing、e/o 等相近的韵，结果里会标出来'}>含宽押</button>
         </div>
-        <label><input type="checkbox" checked={sameTone} onChange={(e) => setSameTone(e.target.checked)} />末字同声调</label>
+        {!en && <label><input type="checkbox" checked={sameTone} onChange={(e) => setSameTone(e.target.checked)} />末字同声调</label>}
         <label><input type="checkbox" checked={showRare} onChange={(e) => setShowRare(e.target.checked)} />生僻词</label>
-        <select value={length} onChange={(e) => setLength(Number(e.target.value))}>
+        <select hidden={en} value={length} onChange={(e) => setLength(Number(e.target.value))}>
           <option value={0}>字数不限</option>
           <option value={2}>2 个字</option>
           <option value={3}>3 个字</option>
@@ -139,26 +169,35 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
           {mine.map((g) => <GroupBox key={g.id} g={g} setGroups={setGroups} onPick={onPick} onAsk={onAsk} />)}
         </div>
       )}
-      {!index && <p className="muted">正在加载词库…</p>}
-      {index && syls.length > 0 && (
+      {!en && !index && <p className="muted">正在加载词库…</p>}
+      {en && !enIdx && <p className="muted">{enFail ? '英文词典没加载出来，刷新页面再试。' : '正在加载英文发音词典…'}</p>}
+      {en && said && said.unknown.length > 0 && <p className="muted">发音词典里没有：{said.unknown.join('、')}。检查一下拼写，或者换一个读音相近的常见词来查。</p>}
+      {en && said && size > 0 && (
+        <p className="muted key">
+          押的音：<code>{enKey(said.ph, useN, mode)}</code>
+          {mode === 'strict' ? '严格押的词少，说唱里多半只押元音，可以点“含宽押”。' : '带“宽”字的只押元音。'}
+        </p>
+      )}
+      {en && said && size > 0 && hits.length === 0 && <p className="muted">常用词里没有能{N_LABEL[useN]}上的。{mode === 'strict' ? '试试“含宽押”，' : ''}或者减少押的音节数。三押以上多半要靠几个词拼成短语。</p>}
+      {!en && index && syls.length > 0 && (
         <p className="muted key">
           押的韵：{tail.map((s, i) => <code key={i}>{s.ch} {s[mode].replace('v', 'ü').replace('i*', 'i（舌尖）')}</code>)}
         </p>
       )}
-      {index && syls.length > 0 && hits.length === 0 && (
+      {!en && index && syls.length > 0 && hits.length === 0 && (
         <p className="muted">
           词库里没有常用词能{N_LABEL[useN]}上这个词。{useN >= 3 ? '三押以上的现成词本来就少，说唱里多半是几个词拼成的短语。可以先找双押，或者打开“含宽押”。' : '可以试试“含宽押”或“生僻词”。'}
         </p>
       )}
       <div className="chips">
-        {shown.map(({ word, looseOnly }) => (
-          <span key={word.w} className={'chip' + (looseOnly ? ' loose' : '') + (likedSet.has(word.w) ? ' liked' : '') + (word.tier === 2 ? ' rare' : '')}>
-            <button className="w" title={word.syls.map((s) => s.py.replace('v', 'ü') + (s.tone || '')).join(' ') + (onPick ? ' · 点击插入草稿' : '')} onClick={() => onPick?.(word.w)}>
-              {word.w}
+        {shown.map(({ w, title, looseOnly, rare }) => (
+          <span key={w} className={'chip' + (looseOnly ? ' loose' : '') + (likedSet.has(w) ? ' liked' : '') + (rare ? ' rare' : '')}>
+            <button className="w" title={title + (onPick ? ' · 点击插入草稿' : '')} onClick={() => onPick?.(w)}>
+              {w}
               {looseOnly && <i>宽</i>}
             </button>
-            <button className="act" title="喜欢，排到前面" onClick={() => setLiked(likedSet.has(word.w) ? liked.filter((x) => x !== word.w) : [...liked, word.w])}>♥</button>
-            <button className="act" title="不押或不是词，以后不再出现" onClick={() => setBlocked([...blocked, word.w])}>×</button>
+            <button className="act" title="喜欢，排到前面" onClick={() => setLiked(likedSet.has(w) ? liked.filter((x) => x !== w) : [...liked, w])}>♥</button>
+            <button className="act" title="不押或不是词，以后不再出现" onClick={() => setBlocked([...blocked, w])}>×</button>
           </span>
         ))}
       </div>
@@ -167,7 +206,7 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
       )}
       <details className="rh-book">
         <summary>韵脚本（{groups.length} 组）</summary>
-        <p className="muted">听歌、看歌词时觉得押得好的一组词记在这里，写上是哪首歌里的。查词时，记过的会排在最前面。英文和别的外文只认你记过的词本身。也可以在“改稿”的素材卡片里直接划词来记。</p>
+        <p className="muted">听歌、看歌词时觉得押得好的一组词记在这里，写上是哪首歌里的。查词时，记过的会排在最前面。英文按读音比，日文韩文只认你记过的词本身。也可以在“改稿”的素材卡片里直接划词来记。</p>
         <form className="rh-new" onSubmit={(e) => { e.preventDefault(); addGroup() }}>
           <input id="rh-items" value={draft.items} onChange={(e) => setDraft({ ...draft, items: e.target.value })} placeholder="一组韵，用逗号隔开，短语里可以有空格" />
           <div className="row tight">

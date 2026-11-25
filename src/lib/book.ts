@@ -1,4 +1,5 @@
 // 韵脚本：自己从歌里记下来的一组组韵。只存押韵的词和出处，不存整段歌词。
+import { enKey, syllables } from './en'
 import { tailKey, toSyls, type Mode } from './rhyme'
 
 export interface RhymeGroup {
@@ -44,16 +45,25 @@ export const sourceOf = (g: Pick<RhymeGroup, 'song' | 'artist'>) => (g.song || g
 
 /**
  * 查一个词时，哪些记过的韵组用得上。
- * 中文按最后一个字的韵比；别的语言没有读音词典，只认组里出现过的词（整个短语，或短语里的某个词）。
+ * 中文按最后一个字的韵比；英文在给了 sound（查读音的函数）时按最后两个元音比；
+ * 其余只认组里出现过的词（整个短语，或短语里的某个词）。
  */
-export function matchGroups(groups: RhymeGroup[], query: string, mode: Mode): RhymeGroup[] {
+export function matchGroups(groups: RhymeGroup[], query: string, mode: Mode, sound?: (text: string) => string[] | null): RhymeGroup[] {
   const q = norm(query)
   if (!q) return []
   const qs = toSyls(query)
+  const qp = sound?.(query)
+  const qn = qp ? syllables(qp) : 0
   return groups.filter((g) =>
     g.items.some((it) => {
       const k = norm(it)
       if (k === q || k.split(' ').includes(q) || q.split(' ').includes(k)) return true
+      const p = qp && sound?.(it)
+      if (p) {
+        // 英文：最后两个元音一样（只有一个音节的就比一个）
+        const n = Math.min(2, qn, syllables(p))
+        if (n > 0 && enKey(qp, n, 'loose') === enKey(p, n, 'loose')) return true
+      }
       const s = toSyls(it)
       if (!qs.length || !s.length) return false
       return tailKey(qs, 1, mode) === tailKey(s, 1, mode)

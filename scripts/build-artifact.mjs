@@ -12,6 +12,7 @@ if (js.length !== 1) throw new Error(`期望一个脚本文件，实际 ${js.len
 mkdirSync(join(out, 'data'), { recursive: true })
 cpSync(join('dist/assets', js[0]), join(out, 'app.js'))
 cpSync('dist/data/zh-words.txt', join(out, 'data/zh-words.txt'))
+cpSync('dist/data/en-words.txt', join(out, 'data/en-words.txt'))
 const style = css.map((f) => readFileSync(join('dist/assets', f), 'utf8')).join('\n')
 writeFileSync(
   join(out, 'index.html'),
