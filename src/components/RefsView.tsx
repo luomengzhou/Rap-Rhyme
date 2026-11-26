@@ -17,6 +17,10 @@ export interface SongRef {
 }
 
 interface Props {
+  /** 韵脚本，用来显示每首歌记了几组韵 */
+  groups: { song: string }[]
+  /** 去韵脚本看这首歌的韵 */
+  onBook: (song: string) => void
   refs: SongRef[]
   setRefs: (r: SongRef[]) => void
   draftTitle: string
@@ -25,9 +29,9 @@ interface Props {
 }
 
 const EMPTY = { song: '', artist: '', at: '', fit: '', note: '', link: '' }
-const STYLES = ['狠 / 攻击', '叙事', '戏谑', '慢热 / chill', '抒情', 'hook 的唱法', '换 beat 的转场', '开头', '结尾']
+const STYLES = ['Boom Bap', 'Storytelling', 'Hardcore', 'Trap', 'Drill', 'Melodic Rap', 'Jazz Rap / Lo-fi', 'Chopper', 'hook 的唱法', '换 beat 的转场', '开头', '结尾']
 
-export function RefsView({ refs, setRefs, draftTitle, sections }: Props) {
+export function RefsView({ groups, onBook, refs, setRefs, draftTitle, sections }: Props) {
   const [form, setForm] = useState(EMPTY)
   const [tie, setTie] = useState(true)
   const [only, setOnly] = useState(false)
@@ -92,6 +96,10 @@ export function RefsView({ refs, setRefs, draftTitle, sections }: Props) {
             <div className="ref-meta">
               {r.fit && <span className="tag">适合：{r.fit}</span>}
               {r.draft && <span className="tag dim">{r.draft}</span>}
+              {(() => {
+                const n = groups.filter((g) => g.song.trim().toLowerCase() === r.song.trim().toLowerCase()).length
+                return <button className="link" onClick={() => onBook(r.song)}>{n ? `韵脚本里记了 ${n} 组韵` : '去韵脚本记它的韵'}</button>
+              })()}
             </div>
             {r.note && <p>{r.note}</p>}
             <div className="row tight">

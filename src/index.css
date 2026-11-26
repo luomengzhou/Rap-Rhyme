@@ -377,3 +377,17 @@ header .drafts { margin-left: auto; }
 .hist-empty { padding: 20px; }
 
 .beat-melody { display: flex; align-items: center; gap: 4px; color: var(--dim); font-size: 12px; white-space: nowrap; }
+
+/* 韵脚本页 */
+.book { max-width: 900px; }
+.book-find { border: 1px solid var(--line); border-radius: 10px; padding: 4px 16px 16px; background: var(--panel); display: flex; flex-direction: column; gap: 10px; }
+.book-find textarea { width: 100%; line-height: 1.7; }
+.book-find input { flex: 1; min-width: 0; }
+.book-cands { display: flex; flex-direction: column; gap: 6px; }
+.book-cand { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; opacity: .55; }
+.book-cand.on { opacity: 1; border-color: var(--accent); }
+.book-cand label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.book-cand .chips { flex: 1; margin: 0; }
+.book-cand .chip .w { padding: 2px 4px 2px 8px; }
+.book h3 input { font-size: 13px; font-weight: 400; width: 220px; }
+.book-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 0 14px; }

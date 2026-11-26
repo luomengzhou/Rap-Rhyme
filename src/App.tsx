@@ -6,6 +6,7 @@ import { barSeconds, deliveryOf, maxPerLine, REGULAR_TEMPLATE, type SectionTpl }
 import { useStored } from './lib/store'
 import { addBackup, commitVersion, dueForAuto, mergeRevised, replaceText, status, type Draft } from './lib/songs'
 import { HistoryPanel } from './components/HistoryPanel'
+import { BookView } from './components/BookView'
 import { BeatBar } from './components/BeatBar'
 import { CheckPanel } from './components/CheckPanel'
 import { Editor } from './components/Editor'
@@ -22,7 +23,7 @@ import type { Material } from './lib/ai'
 import type { RhymeGroup } from './lib/book'
 import { TheoryView } from './components/TheoryView'
 
-type View = 'write' | 'flow' | 'hum' | 'refs' | 'breakdown' | 'genres' | 'theory'
+type View = 'write' | 'book' | 'flow' | 'hum' | 'refs' | 'breakdown' | 'genres' | 'theory'
 
 /** 把以前跟着各份草稿存的素材收到一起，同一条只留一份 */
 function gatherMaterials(reviews: Record<string, ReviewState>): Material[] {
@@ -64,6 +65,7 @@ export default function App() {
   const [playing, setPlaying] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   const [ask, setAsk] = useState('')
+  const [bookFocus, setBookFocus] = useState('')
   const [sel, setSel] = useState({ start: 0, end: 0, text: '' })
   const input = useRef<HTMLTextAreaElement>(null)
 
@@ -206,6 +208,7 @@ export default function App() {
         <h1>Rap Rhyme<small>写词工作台</small></h1>
         <nav>
           <button className={view === 'write' ? 'on' : ''} onClick={() => setView('write')}>写词</button>
+          <button className={view === 'book' ? 'on' : ''} onClick={() => setView('book')}>韵脚本</button>
           <button className={view === 'flow' ? 'on' : ''} onClick={() => setView('flow')}>打拍</button>
           <button className={view === 'hum' ? 'on' : ''} onClick={() => setView('hum')}>哼唱</button>
           <button className={view === 'refs' ? 'on' : ''} onClick={() => setView('refs')}>听歌笔记</button>
@@ -313,6 +316,11 @@ export default function App() {
           }
         />
       )}
+      {view === 'book' && (
+        <main className="single">
+          <BookView groups={groups} setGroups={setGroups} materials={materials} refs={refs} setRefs={setRefs} mode={mode} isWord={index ? (w) => index.set.has(w) : undefined} focus={bookFocus} onLookup={lookup} onAsk={askClaude} />
+        </main>
+      )}
       {view === 'flow' && (
         <main className="single">
           <FlowView bpm={bpm} playing={playing} start={start} currentLine={currentLine} />
@@ -325,7 +333,7 @@ export default function App() {
       )}
       {view === 'refs' && (
         <main className="single">
-          <RefsView refs={refs} setRefs={setRefs} draftTitle={draft.title} sections={analysis.sections.map((x) => x.name).filter((n) => n !== '未命名段落')} />
+          <RefsView groups={groups} onBook={(song) => { setBookFocus(song); setView('book') }} refs={refs} setRefs={setRefs} draftTitle={draft.title} sections={analysis.sections.map((x) => x.name).filter((n) => n !== '未命名段落')} />
         </main>
       )}
       {view === 'breakdown' && (
