@@ -1,6 +1,7 @@
 import type { Analysis } from '../lib/analyze'
 import { genreOf } from '../lib/genres'
 import { barSeconds, REGULAR_TEMPLATE, type SectionTpl } from '../lib/styles'
+import { irregular, judge, KIND_NAMES, shape, similarPrompt } from '../lib/structure'
 
 interface Props {
   analysis: Analysis
@@ -33,6 +34,8 @@ export function StructurePanel({ analysis, template, setTemplate, bpm, onInsert,
     return { sec, plan: k >= 0 ? template[k].bars : null }
   })
   const written = analysis.sections.reduce((a, s) => a + s.bars, 0)
+  const judged = judge(analysis.sections)
+  const odd = irregular(judged)
 
   const named = analysis.sections.filter((x) => x.name !== '未命名段落')
   const hasHook = named.some((x) => /hook|副歌|chorus/i.test(x.name))
@@ -96,6 +99,33 @@ export function StructurePanel({ analysis, template, setTemplate, bpm, onInsert,
         <button disabled={written === 0} onClick={() => onAsk('这首现在的长短合适吗？如果要加长，加在哪里最自然；如果不加，为什么也成立？')}>问 Claude 长短怎么选</button>
       </div>
 
+      <h3>和规整的歌比</h3>
+      {judged.length === 0 ? (
+        <p className="muted">草稿里还没有内容。用 [主歌1]、[副歌] 这样的标题分段，一行算一小节，这里会告诉你每段是长了还是短了。</p>
+      ) : (
+        <>
+          <p className="st-shape">{shape(judged)}</p>
+          <table className="progress st-table">
+            <tbody>
+              {judged.map((x, i) => (
+                <tr key={i} onClick={() => onJump(x.start)} className={'st-' + x.size}>
+                  <td>{x.name}{x.kind !== 'other' && !x.name.includes(KIND_NAMES[x.kind]) ? <small> {KIND_NAMES[x.kind]}</small> : null}</td>
+                  <td>{x.bars} 小节</td>
+                  <td className="note">{x.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="muted">
+            {odd.length ? `和规整的歌不一样的地方：${odd.join('；')}。这些都有人这么写，不是错。` : '整体是规整的结构。'}
+            {named.length < 2 && ' 还没有分段，所以整首被当成了一段。'}
+          </p>
+          <div className="row">
+            <button onClick={() => onAsk(similarPrompt(judged))}>找结构相近的歌去听</button>
+          </div>
+        </>
+      )}
+
       <h3>结构模板</h3>
       <p className="muted">规整的歌以 4 小节为一个乐句：主歌 16 小节，副歌 8 小节。按你的想法改，不规整不等于不好。</p>
       <ul className="tpl">
@@ -117,9 +147,9 @@ export function StructurePanel({ analysis, template, setTemplate, bpm, onInsert,
       </div>
       <p className="muted">共 {total} 小节，{bpm} BPM 下约 {fmt(total * barSeconds(bpm))}。</p>
 
-      <h3>草稿进度</h3>
+      <h3>对照自己的模板</h3>
       {rows.length === 0 ? (
-        <p className="muted">草稿里还没有内容。用 [主歌1] 这样的标题分段，一行算一小节。</p>
+        <p className="muted">草稿里有了和模板同名的段落后，这里显示写了多少。</p>
       ) : (
         <table className="progress">
           <tbody>
@@ -127,15 +157,12 @@ export function StructurePanel({ analysis, template, setTemplate, bpm, onInsert,
               <tr key={i} onClick={() => onJump(sec.start)}>
                 <td>{sec.name}</td>
                 <td>{sec.bars}{plan ? ` / ${plan}` : ''} 小节</td>
-                <td className="note">
-                  {plan && sec.bars > plan ? `多了 ${sec.bars - plan} 小节` : plan && sec.bars === plan ? '写满了' : !plan && sec.bars % 4 ? '不是 4 的倍数' : ''}
-                </td>
+                <td className="note">{plan && sec.bars > plan ? `多了 ${sec.bars - plan} 小节` : plan && sec.bars === plan ? '写满了' : plan ? `还差 ${plan - sec.bars} 小节` : '模板里没有这一段'}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      <p className="muted">“找结构相近的现成歌”需要歌曲数据，放在后面的版本。</p>
     </div>
   )
 }

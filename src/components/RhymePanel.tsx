@@ -32,7 +32,7 @@ interface BoxProps {
 }
 
 /** 一组记下来的韵：带颜色的框，写着出处，点词可以插进草稿 */
-function GroupBox({ g, setGroups, onPick, onAsk }: BoxProps) {
+export function GroupBox({ g, setGroups, onPick, onAsk }: BoxProps) {
   const [more, setMore] = useState('')
   const [sure, setSure] = useState(false)
   const patch = (f: (x: RhymeGroup) => RhymeGroup) => setGroups((all) => all.map((x) => (x.id === g.id ? f(x) : x)))
@@ -263,7 +263,7 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
       )}
       <details className="rh-book">
         <summary>韵脚本（{groups.length} 组）</summary>
-        <p className="muted">听歌、看歌词时觉得押得好的一组词记在这里，写上是哪首歌里的。查词时，记过的会排在最前面。英文按读音比，日文韩文只认你记过的词本身。也可以在“改稿”的素材卡片里直接划词来记。</p>
+        <p className="muted">听歌、看歌词时觉得押得好的一组词记在这里，写上是哪首歌里的。查词时，记过的会排在最前面。英文按读音比，日文韩文只认你记过的词本身。也可以去顶上的“韵脚本”页贴一段歌词自动找，或者在素材卡片里直接划词来记。</p>
         <form className="rh-new" onSubmit={(e) => { e.preventDefault(); addGroup() }}>
           <input id="rh-items" value={draft.items} onChange={(e) => setDraft({ ...draft, items: e.target.value })} placeholder="一组韵，用逗号隔开，短语里可以有空格" />
           <div className="row tight">

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { beatOf, engine } from '../lib/beats'
+import { beatOf, engine, KIT_NAMES } from '../lib/beats'
+import { useStored } from '../lib/store'
 import { FAMILIES, GENRES, genreOf } from '../lib/genres'
 
 interface Props {
@@ -15,6 +16,10 @@ interface Props {
 export function BeatBar({ beatId, setBeatId, bpm, setBpm, playing, toggle }: Props) {
   const [step, setStep] = useState(-1)
   useEffect(() => engine.onStep(setStep), [])
+  const [melody, setMelody] = useStored('rr.beatMelody', true)
+  useEffect(() => {
+    engine.melody = melody
+  }, [melody])
   const beat = beatOf(beatId)
   const genre = genreOf(beat.id)
   return (
@@ -47,7 +52,14 @@ export function BeatBar({ beatId, setBeatId, bpm, setBpm, playing, toggle }: Pro
           <i key={i} className={(i % 4 === 0 ? 'beat ' : '') + (step >= 0 && step % 16 === i ? 'now' : '')} />
         ))}
       </div>
-      <span className="desc" title={beat.desc}>{genre ? `${genre.zh}：${beat.desc}` : beat.desc}。鼓点骨架由浏览器合成，音色只是示意。</span>
+      <label className="beat-melody" title="旋律是合成的示意，嫌吵可以关掉，只听鼓和低音">
+        <input type="checkbox" checked={melody} onChange={(e) => setMelody(e.target.checked)} />
+        旋律
+      </label>
+      <span className="desc" title={beat.desc}>
+        {genre ? `${genre.zh}：${beat.desc}` : beat.desc}
+        {beat.kit ? `。鼓声：${KIT_NAMES[beat.kit]}（真实采样），打法是这个曲风最通用的骨架。` : ''}
+      </span>
     </footer>
   )
 }
