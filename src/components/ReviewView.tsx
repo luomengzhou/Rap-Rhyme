@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { hasScroll, Splitter, useScrollMemory } from './Layout'
+import { useStored } from '../lib/store'
 import { addItems, markLine, type RhymeGroup } from '../lib/book'
 import { colorOf } from '../lib/palette'
 import { buildInput, errorText, getSample, GLOSS_MAX_LINES, glossPrompt, locateGloss, splitReply, translatePrompt, type Material, type Sample, type Turn } from '../lib/ai'
@@ -15,7 +17,18 @@ export interface ReviewState {
   materials?: Material[]
 }
 
+/** 右边一栏的标签 */
+export type Side = 'check' | 'rhyme' | 'structure' | 'list' | 'chat' | 'mats'
+
 interface Props {
+  /** 这份草稿的编号，用来分开记各份草稿的滚动位置 */
+  id: string
+  /** 左边的编辑器 */
+  editor: ReactNode
+  /** 右边“检查、找韵、结构”三个标签的内容 */
+  panels: Record<'check' | 'rhyme' | 'structure', ReactNode>
+  side: Side
+  setSide: (s: Side) => void
   title: string
   text: string
   state: ReviewState | undefined
@@ -26,9 +39,12 @@ interface Props {
   /** 韵脚本，和写词页共用 */
   groups: RhymeGroup[]
   setGroups: Dispatch<SetStateAction<RhymeGroup[]>>
-  onSaveAsNew: (text: string) => void
-  /** 草稿还是空的时候，直接把提纲写进去 */
-  onWrite: (text: string) => void
+  /** 用改后稿换掉正在写的稿子（原来的会先备份） */
+  onAdopt: (text: string) => void
+  /** 左边工具条右侧的按钮：存备份、定稿 */
+  tools: ReactNode
+  /** 版本和备份的列表 */
+  history: ReactNode
   /** 给 Claude 的背景数据，如 BPM、小节数 */
   facts: string
   /** 从别的页面带过来、要自动发出的问题 */
@@ -194,7 +210,7 @@ function inline(a: string, b: string): [string, string, string, string, string] 
   return [a.slice(0, p), a.slice(p, a.length - s), b.slice(p, b.length - s), a.slice(a.length - s), b.slice(0, p)]
 }
 
-export function ReviewView({ title, text, state, setState, materials: saved, setMaterials, groups, setGroups, onSaveAsNew, onWrite, facts, ask, clearAsk }: Props) {
+export function ReviewView({ id, editor, panels, side: tab, setSide: setTab, title, text, state, setState, materials: saved, setMaterials, groups, setGroups, onAdopt, tools, history, facts, ask, clearAsk }: Props) {
   const cur: ReviewState = state ?? { review: { title: `${title || '未命名'} · 改稿`, suggestions: [] }, accepted: [], choice: {}, chat: [] }
   const { review, accepted, choice } = cur
   const chat = cur.chat ?? []
@@ -253,7 +269,12 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
   const toggleMat = (m: Material) =>
     setMaterials((all) => (all.some((x) => x.title === m.title) ? all.filter((x) => x.title !== m.title) : [...all, { ...m, id: 'm' + Math.random().toString(36).slice(2, 10) }]))
 
-  const [tab, setTab] = useState<'chat' | 'list' | 'mats'>('chat')
+  const [left, setLeft] = useState<'write' | 'diff' | 'history'>('write')
+  const [asideW, setAsideW] = useStored('rr.asideW', 440)
+  const [split, setSplit] = useStored('rr.diffSplit', 0.5)
+  const root = useRef<HTMLElement>(null)
+  const diffBox = useRef<HTMLElement>(null)
+  useScrollMemory(root, [tab, left])
   const [error, setError] = useState('')
   const [pasting, setPasting] = useState(false)
   const [raw, setRaw] = useState('')
@@ -278,9 +299,16 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
       ctl.current?.abort()
     }
   }, [])
+  const firstLog = useRef(true)
   useEffect(() => {
-    log.current?.scrollTo({ top: log.current.scrollHeight })
-  }, [chat.length, streaming])
+    // 刚切回这个标签时，回到上次看到的位置；有新消息时才滚到最底下
+    const back = firstLog.current && hasScroll(`chat:${id}`)
+    firstLog.current = false
+    if (!back) log.current?.scrollTo({ top: log.current.scrollHeight })
+  }, [chat.length, streaming, tab, id])
+  useEffect(() => {
+    if (tab !== 'chat') firstLog.current = true
+  }, [tab])
 
   const load = (json: string) => {
     try {
@@ -343,12 +371,14 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
   const rows = useMemo(() => diffLines(text, final), [text, final])
   const usable = review.suggestions.filter((s) => applied.status[s.id] !== 'missing')
   const changed = final !== text
+  const nAccepted = accepted.filter((x) => applied.status[x] === 'ok').length
   const [editing, setEditing] = useState(false)
   const [dropManual, setDropManual] = useState(false)
   const [manualMsg, setManualMsg] = useState('')
 
   const toggle = (id: string) => {
     const on = !accepted.includes(id)
+    if (on) setLeft('diff')
     const next = { ...cur, accepted: on ? [...accepted, id] : accepted.filter((x) => x !== id) }
     if (manual === undefined) return setState(next)
     // 已经手改过：新接受的建议直接写进手改稿，找不到原句就不动
@@ -368,11 +398,16 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
   const remove = (id: string) =>
     setState({ ...cur, review: { ...review, suggestions: review.suggestions.filter((s) => s.id !== id) }, accepted: accepted.filter((x) => x !== id) })
   const jump = (find: string) => {
+    setLeft('diff')
+    setEditing(false)
     const key = find.replace(/[\s*]/g, '').slice(0, 6)
-    const el = [...document.querySelectorAll<HTMLElement>('.diff-row')].find((r) => r.dataset.key?.includes(key))
-    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-    el?.classList.add('flash')
-    setTimeout(() => el?.classList.remove('flash'), 1200)
+    // 等对比视图画出来再找那一行
+    setTimeout(() => {
+      const el = [...document.querySelectorAll<HTMLElement>('.diff-row')].find((r) => r.dataset.key?.includes(key))
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      el?.classList.add('flash')
+      setTimeout(() => el?.classList.remove('flash'), 1200)
+    }, 60)
   }
 
   const importer = (
@@ -406,12 +441,31 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
   )
 
   return (
-    <main className="review">
-      <section className="diff">
+    <main className="work" ref={root} style={{ gridTemplateColumns: `minmax(0, 1fr) 7px ${asideW}px` }}>
+      <section className="work-left">
+        <div className="work-mode">
+          <button className={left === 'write' ? 'on' : ''} onClick={() => setLeft('write')}>写词</button>
+          <button className={left === 'diff' ? 'on' : ''} onClick={() => setLeft('diff')}>
+            改前改后{nAccepted > 0 || manual !== undefined ? <i className="tag">{manual !== undefined ? '手改过' : `已接受 ${nAccepted} 条`}</i> : null}
+          </button>
+          <button className={left === 'history' ? 'on' : ''} onClick={() => setLeft('history')}>版本和备份</button>
+          <span className="work-tools">{tools}</span>
+        </div>
+        {left === 'write' && editor}
+        {left === 'history' && history}
+      {left === 'diff' && (
+      <section className="diff" ref={diffBox} style={{ '--dl': `${split}fr`, '--dr': `${1 - split}fr`, '--dl-n': split } as React.CSSProperties}>
+        <Splitter
+          className="diff-split"
+          onDrag={(x) => {
+            const r = diffBox.current?.getBoundingClientRect()
+            if (r) setSplit(Math.min(0.8, Math.max(0.2, (x - r.left) / r.width)))
+          }}
+        />
         <div className="diff-head">
-          <div>原稿<small>不会被改动</small></div>
+          <div>现在的稿子</div>
           <div>
-            改后<small>已接受 {accepted.filter((id) => applied.status[id] === 'ok').length} / {usable.length} 条</small>
+            改后<small>已接受 {nAccepted} / {usable.length} 条</small>
             {manual !== undefined && <span className="tag">手改过</span>}
             <button onClick={() => { if (!editing && manual === undefined) setState({ ...cur, manual: applied.text }); setEditing(!editing); setManualMsg('') }}>{editing ? '看对比' : '自己改'}</button>
             {manual !== undefined && (dropManual ? (
@@ -422,11 +476,20 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
             ) : (
               <button className="link" title="丢掉手改的内容，回到按建议生成的改后稿" onClick={() => setDropManual(true)}>放弃手改</button>
             ))}
-            {text.trim() ? (
-              <button className="primary" disabled={!changed} onClick={() => onSaveAsNew(final)}>存为新草稿</button>
-            ) : (
-              <button className="primary" disabled={!changed} onClick={() => { onWrite(final); setState({ ...cur, accepted: [], manual: undefined }); setEditing(false) }}>写进这份草稿</button>
-            )}
+            <button
+              className="primary"
+              disabled={!changed}
+              title="现在的稿子会先存一份备份，随时能恢复"
+              onClick={() => {
+                onAdopt(final)
+                setState({ ...cur, accepted: [], manual: undefined, review: { ...review, suggestions: review.suggestions.filter((x) => !accepted.includes(x.id)) } })
+                setEditing(false)
+                setManualMsg('')
+                setLeft('write')
+              }}
+            >
+              {text.trim() ? '用这份改后稿' : '写进这份草稿'}
+            </button>
           </div>
         </div>
         {manualMsg && <p className="muted diff-note">{manualMsg}</p>}
@@ -436,7 +499,7 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
             <textarea id="review-manual" className="dcell new" value={manual ?? ''} onChange={(e) => setState({ ...cur, manual: e.target.value })} placeholder="在这里直接改。原稿在左边，不会被动到。" spellCheck={false} />
           </div>
         )}
-        <div className="diff-body" hidden={editing}>
+        <div className="diff-body" hidden={editing} data-scroll={`diff:${id}`}>
           {!text.trim() && !changed && <p className="muted diff-empty">这份草稿还是空的。可以先在右边和 Claude 聊主题，让它把提纲写进来；也可以去“写词”里直接写。</p>}
           {rows.map((r, i) => {
             const left = r.left?.replace(/\*/g, '') ?? null
@@ -452,17 +515,28 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
           })}
         </div>
       </section>
+      )}
+      </section>
+
+      <Splitter onDrag={(x) => setAsideW(Math.round(Math.min(900, Math.max(320, window.innerWidth - x))))} />
 
       <aside>
-        <div className="tabs">
-          <button className={tab === 'chat' ? 'on' : ''} onClick={() => setTab('chat')}>和 Claude 聊</button>
-          <button className={tab === 'list' ? 'on' : ''} onClick={() => setTab('list')}>建议（{review.suggestions.length}）</button>
-          <button className={tab === 'mats' ? 'on' : ''} onClick={() => setTab('mats')}>素材（{saved.length}）</button>
+        <div className="tabs work-tabs">
+          <button className={tab === 'check' ? 'on' : ''} onClick={() => setTab('check')}>检查</button>
+          <button className={tab === 'rhyme' ? 'on' : ''} onClick={() => setTab('rhyme')}>找韵</button>
+          <button className={tab === 'structure' ? 'on' : ''} onClick={() => setTab('structure')}>结构</button>
+          <button className={tab === 'chat' ? 'on' : ''} onClick={() => setTab('chat')}>Claude</button>
+          <button className={tab === 'list' ? 'on' : ''} onClick={() => setTab('list')}>建议{review.suggestions.length ? `（${review.suggestions.length}）` : ''}</button>
+          <button className={tab === 'mats' ? 'on' : ''} onClick={() => setTab('mats')}>素材{saved.length ? `（${saved.length}）` : ''}</button>
         </div>
+
+        {(tab === 'check' || tab === 'rhyme' || tab === 'structure') && (
+          <div className="pane" data-scroll={`${tab}:${id}`}>{panels[tab]}</div>
+        )}
 
         {tab === 'chat' && (
           <div className="chat">
-            <div className="chat-log" ref={log}>
+            <div className="chat-log" ref={log} data-scroll={`chat:${id}`}>
               {chat.length === 0 && streaming === null && (
                 <div className="chat-intro">
                   <p className="muted">
@@ -470,7 +544,7 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
                       ? <>这个网址上没有接 Claude。从 <a href="https://claude.ai/artifact/BiNJshjbS8uoLRfLpNZSzm" target="_blank" rel="noreferrer">claude.ai 上的这份网站</a> 打开，就能在这里直接对话。</>
                       : idea
                         ? '这份草稿还在构思阶段。把你想写的主题、感觉、看过的书讲给 Claude 听，它会帮你理成几段，并给典故、意象这类素材，喜欢的可以收藏。'
-                        : 'Claude 能看到左边这份草稿。问它什么都行，它给的改动会变成“建议”，在左边分屏里看改前改后，原稿不动。'}
+                        : 'Claude 能看到左边这份草稿。问它什么都行，它给的改动会变成“建议”，接受后在左边的“改前改后”里看，原稿不动。'}
                   </p>
                   {sample && idea && IDEA_STARTERS.map((s) => (
                     <button key={s} className="starter" onClick={() => { setDraftMsg(s.includes('先听我讲') ? '我想写的主题是：' : s); document.getElementById('chat-input')?.focus() }}>{s}</button>
@@ -544,7 +618,7 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
         )}
 
         {tab === 'mats' && (
-          <div className="pane">
+          <div className="pane" data-scroll="mats">
             <p className="muted">收藏的典故、诗词、意象和参考歌曲，所有草稿和版本共用一份。Claude 凭记忆给的内容，用之前点“搜原文核对”确认一下。在卡片的原文里用鼠标划一下：划几行外文可以只翻译那几行；划一个词或短语可以记成韵脚，同一组韵会标上同一种颜色，写词页查韵时会排在最前面。</p>
             {matForm ? (
               <form className="mat-form" onSubmit={(e) => { e.preventDefault(); saveMat() }}>
@@ -576,7 +650,7 @@ export function ReviewView({ title, text, state, setState, materials: saved, set
         )}
 
         {tab === 'list' && (
-          <div className="pane">
+          <div className="pane" data-scroll={`list:${id}`}>
             {review.summary && <p className="review-summary">{review.summary}</p>}
             <h3>
               建议（{review.suggestions.length}）

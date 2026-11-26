@@ -4,6 +4,9 @@ import { beatOf, engine } from './lib/beats'
 import { buildIndex, type Mode, type RhymeIndex } from './lib/rhyme'
 import { barSeconds, deliveryOf, maxPerLine, REGULAR_TEMPLATE, type SectionTpl } from './lib/styles'
 import { useStored } from './lib/store'
+import { addBackup, commitVersion, dueForAuto, mergeRevised, replaceText, status, type Draft } from './lib/songs'
+import { HistoryPanel } from './components/HistoryPanel'
+import { BookView } from './components/BookView'
 import { BeatBar } from './components/BeatBar'
 import { CheckPanel } from './components/CheckPanel'
 import { Editor } from './components/Editor'
@@ -15,19 +18,12 @@ import { BreakdownView } from './components/BreakdownView'
 import { GenresView } from './components/GenresView'
 import type { Breakdown } from './lib/breakdown'
 import { RefsView, type SongRef } from './components/RefsView'
-import { ReviewView, type ReviewState } from './components/ReviewView'
+import { ReviewView, type ReviewState, type Side } from './components/ReviewView'
 import type { Material } from './lib/ai'
 import type { RhymeGroup } from './lib/book'
 import { TheoryView } from './components/TheoryView'
 
-interface Draft {
-  id: string
-  title: string
-  text: string
-}
-
-type View = 'write' | 'review' | 'flow' | 'hum' | 'refs' | 'breakdown' | 'genres' | 'theory'
-type Side = 'check' | 'rhyme' | 'structure'
+type View = 'write' | 'book' | 'idea' | 'study' | 'genres' | 'theory'
 
 /** 把以前跟着各份草稿存的素材收到一起，同一条只留一份 */
 function gatherMaterials(reviews: Record<string, ReviewState>): Material[] {
@@ -69,11 +65,50 @@ export default function App() {
   const [playing, setPlaying] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   const [ask, setAsk] = useState('')
+  const [bookFocus, setBookFocus] = useState('')
+  // 记灵感（自己的想法）：敲节奏、哼一段；学歌（别人的歌）：听歌笔记、拆歌
+  const [ideaTab, setIdeaTab] = useStored<'tap' | 'hum'>('rr.ideaTab', 'tap')
+  const [studyTab, setStudyTab] = useStored<'notes' | 'breakdown'>('rr.studyTab', 'notes')
   const [sel, setSel] = useState({ start: 0, end: 0, text: '' })
   const input = useRef<HTMLTextAreaElement>(null)
 
   const draft = drafts.find((d) => d.id === activeId) ?? drafts[0]
-  const setText = (text: string) => setDrafts(drafts.map((d) => (d.id === draft.id ? { ...d, text } : d)))
+  const patch = (f: (d: Draft) => Draft) => setDrafts((all) => all.map((d) => (d.id === draft.id ? f(d) : d)))
+  /** 改稿子：每次都自动保存；离上次备份够久了就顺手把改之前的样子存一份 */
+  const setText = (text: string) =>
+    patch((d) => {
+      const now = Date.now()
+      return { ...(dueForAuto(d, now) ? addBackup(d, now, true) : d), text }
+    })
+  const [saved, setSaved] = useState('')
+  const flash = (msg: string) => {
+    setSaved(msg)
+    setTimeout(() => setSaved(''), 2500)
+  }
+
+  // 旧版本里“存为新草稿”留下的「某某（改后）（改后）」，收成同一首歌的 V1、V2…，只做一次
+  const [merged, setMerged] = useStored('rr.songsMerged', false)
+  useEffect(() => {
+    if (merged) return
+    setMerged(true)
+    const { drafts: next, moved } = mergeRevised(drafts)
+    if (next.length === drafts.length) return
+    setDrafts(next)
+    if (moved[activeId]) setActiveId(moved[activeId])
+    // 几份草稿各自和 Claude 的对话接在一起，跟着留下来的那一份
+    setReviews((all) => {
+      const out = { ...all }
+      for (const d of drafts) {
+        const to = moved[d.id]
+        if (!to || to === d.id || !out[d.id]) continue
+        const keep = out[to] ?? { review: { title: '', suggestions: [] }, accepted: [], choice: {}, chat: [] }
+        out[to] = { ...keep, chat: [...(out[d.id].chat ?? []), ...(keep.chat ?? [])] }
+        delete out[d.id]
+      }
+      return out
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     fetch(import.meta.env.BASE_URL + 'data/zh-words.txt')
@@ -154,13 +189,14 @@ export default function App() {
   }
 
   const written = analysis.sections.reduce((a, x) => a + x.bars, 0)
-  const mine = refs.filter((r) => r.draft === (draft.title || '未命名')).slice(0, 12)
+  const mine = refs.filter((r) => r.draft === (draft.title || '未命名') || (!r.draft && !r.folder)).slice(0, 16)
   const refNotes = mine.length
-    ? '\n作者为这份草稿记的听歌笔记（参考手法用）：\n' + mine.map((r) => `- ${r.song}${r.artist ? ' / ' + r.artist : ''}${r.at ? '，位置 ' + r.at : ''}${r.fit ? '，适合 ' + r.fit : ''}${r.note ? '，' + r.note : ''}`).join('\n')
+    ? '\n作者记的听歌笔记（这首歌的和全局的，参考手法用）：\n' + mine.map((r) => `- ${r.song}${r.artist ? ' / ' + r.artist : ''}${r.at ? '，位置 ' + r.at : ''}${r.fit ? '，适合 ' + r.fit : ''}${r.note ? '，' + r.note : ''}`).join('\n')
     : ''
   const askClaude = (q: string) => {
     setAsk(q)
-    setView('review')
+    setSide('chat')
+    setView('write')
   }
   const picked = sel.text.trim()
   const currentLine = useMemo(() => {
@@ -175,22 +211,20 @@ export default function App() {
         <h1>Rap Rhyme<small>写词工作台</small></h1>
         <nav>
           <button className={view === 'write' ? 'on' : ''} onClick={() => setView('write')}>写词</button>
-          <button className={view === 'review' ? 'on' : ''} onClick={() => setView('review')}>改稿</button>
-          <button className={view === 'flow' ? 'on' : ''} onClick={() => setView('flow')}>打拍</button>
-          <button className={view === 'hum' ? 'on' : ''} onClick={() => setView('hum')}>哼唱</button>
-          <button className={view === 'refs' ? 'on' : ''} onClick={() => setView('refs')}>听歌笔记</button>
-          <button className={view === 'breakdown' ? 'on' : ''} onClick={() => setView('breakdown')}>拆歌</button>
+          <button className={view === 'book' ? 'on' : ''} onClick={() => setView('book')}>韵脚本</button>
+          <button className={view === 'idea' ? 'on' : ''} onClick={() => setView('idea')} title="自己脑子里的节奏和旋律：敲出来、哼出来">记灵感</button>
+          <button className={view === 'study' ? 'on' : ''} onClick={() => setView('study')} title="别人的歌：听歌笔记、拆歌">学歌</button>
           <button className={view === 'genres' ? 'on' : ''} onClick={() => setView('genres')}>曲风</button>
           <button className={view === 'theory' ? 'on' : ''} onClick={() => setView('theory')}>乐理卡</button>
         </nav>
-        {(view === 'write' || view === 'review' || view === 'refs') && (
+        {(view === 'write' || view === 'study') && (
           <div className="drafts">
             <select value={draft.id} onChange={(e) => { setActiveId(e.target.value); setConfirmDel(false) }}>
               {drafts.map((d) => (
-                <option key={d.id} value={d.id}>{d.title || '未命名'}</option>
+                <option key={d.id} value={d.id}>{d.title || '未命名'}{d.versions?.length ? ` · V${d.versions.length}` : ''}</option>
               ))}
             </select>
-            <input value={draft.title} onChange={(e) => setDrafts(drafts.map((d) => (d.id === draft.id ? { ...d, title: e.target.value } : d)))} placeholder="标题" />
+            <input value={draft.title} onChange={(e) => patch((d) => ({ ...d, title: e.target.value }))} placeholder="标题" />
             <button
               onClick={() => {
                 const d = newDraft()
@@ -222,38 +256,26 @@ export default function App() {
       </header>
 
       {view === 'write' && (
-        <main className="write">
-          <section className="left">
-            <Editor text={draft.text} analysis={analysis} maxPerLine={limit} onChange={setText} onSelect={setSel} inputRef={input} />
-            {HAN.test(picked) && (
-              <button className="float" onMouseDown={(e) => e.preventDefault()} onClick={() => lookup(picked)}>
-                找「{picked}」的韵
-              </button>
-            )}
-          </section>
-          <aside>
-            <div className="tabs">
-              <button className={side === 'check' ? 'on' : ''} onClick={() => setSide('check')}>检查</button>
-              <button className={side === 'rhyme' ? 'on' : ''} onClick={() => setSide('rhyme')}>找韵</button>
-              <button className={side === 'structure' ? 'on' : ''} onClick={() => setSide('structure')}>结构</button>
-            </div>
-            <div className="pane">
-              {side === 'check' && (
-                <CheckPanel analysis={analysis} delivery={delivery} setDelivery={setDeliveryId} bpm={bpm} maxPerLine={limit} mode={mode} setMode={setMode} onWord={lookup} onJump={jump} />
-              )}
-              {side === 'rhyme' && (
-                <RhymePanel index={index} query={query} setQuery={setQuery} mode={mode} setMode={setMode} blocked={blocked} setBlocked={setBlocked} liked={liked} setLiked={setLiked} onPick={insert} groups={groups} setGroups={setGroups} onAsk={askClaude} />
-              )}
-              {side === 'structure' && (
-                <StructurePanel beatId={beatId} onAsk={askClaude} analysis={analysis} template={template} setTemplate={setTemplate} bpm={bpm} onInsert={insertTemplate} onJump={jump} />
-              )}
-            </div>
-          </aside>
-        </main>
-      )}
-      {view === 'review' && (
         <ReviewView
           key={draft.id}
+          id={draft.id}
+          side={side}
+          setSide={setSide}
+          editor={
+            <div className="left">
+              <Editor text={draft.text} analysis={analysis} maxPerLine={limit} onChange={setText} onSelect={setSel} inputRef={input} />
+              {HAN.test(picked) && (
+                <button className="float" onMouseDown={(e) => e.preventDefault()} onClick={() => lookup(picked)}>
+                  找「{picked}」的韵
+                </button>
+              )}
+            </div>
+          }
+          panels={{
+            check: <CheckPanel analysis={analysis} delivery={delivery} setDelivery={setDeliveryId} bpm={bpm} maxPerLine={limit} mode={mode} setMode={setMode} onWord={lookup} onJump={jump} />,
+            rhyme: <RhymePanel index={index} query={query} setQuery={setQuery} mode={mode} setMode={setMode} blocked={blocked} setBlocked={setBlocked} liked={liked} setLiked={setLiked} onPick={insert} groups={groups} setGroups={setGroups} onAsk={askClaude} />,
+            structure: <StructurePanel beatId={beatId} onAsk={askClaude} analysis={analysis} template={template} setTemplate={setTemplate} bpm={bpm} onInsert={insertTemplate} onJump={jump} />,
+          }}
           title={draft.title}
           text={draft.text}
           facts={`当前速度 ${bpm} BPM（一小节约 ${barSeconds(bpm).toFixed(1)} 秒），唱法：${delivery.en}（${delivery.name}）。草稿已写 ${written} 小节（一行算一小节），照这个速度约 ${Math.round(written * barSeconds(bpm))} 秒，不含重复的 hook、前奏和间奏。${refNotes}`}
@@ -270,43 +292,74 @@ export default function App() {
             else delete next[draft.id]
             setReviews(next)
           }}
-          onWrite={setText}
-          onSaveAsNew={(text) => {
-            const d = { ...newDraft(`${draft.title || '未命名'}（改后）`), text }
-            setDrafts([...drafts, d])
-            setActiveId(d.id)
-            setView('write')
-          }}
+          onAdopt={(text) => patch((d) => replaceText(d, text, Date.now()))}
+          tools={
+            <>
+              <small className="muted">{saved || `自动保存 · ${status(draft)}`}</small>
+              <button onClick={() => { patch((d) => addBackup(d, Date.now())); flash('已存一份备份') }} title="把现在的样子存一份，不算新版本">存个备份</button>
+              <button
+                className="primary"
+                disabled={!draft.text.trim() || draft.versions?.[draft.versions.length - 1]?.text === draft.text}
+                onClick={() => { patch((d) => commitVersion(d, Date.now())); flash(`已定稿为 V${(draft.versions?.length ?? 0) + 1}`) }}
+                title="写到一个满意的阶段时点一下，像提交一次"
+              >
+                定稿为 V{(draft.versions?.length ?? 0) + 1}
+              </button>
+            </>
+          }
+          history={
+            <HistoryPanel
+              key={draft.id}
+              draft={draft}
+              onRestore={(text) => { patch((d) => replaceText(d, text, Date.now())); flash('已恢复，原来的存了备份') }}
+              onDelete={(kind, i) => patch((d) => ({ ...d, [kind]: (d[kind] ?? []).filter((_, k) => k !== i) }))}
+            />
+          }
         />
       )}
-      {view === 'flow' && (
+      {view === 'book' && (
         <main className="single">
-          <FlowView bpm={bpm} playing={playing} start={start} currentLine={currentLine} />
+          <BookView groups={groups} setGroups={setGroups} materials={materials} refs={refs} setRefs={setRefs} mode={mode} isWord={index ? (w) => index.set.has(w) : undefined} focus={bookFocus} onLookup={lookup} onAsk={askClaude} />
         </main>
       )}
-      {view === 'hum' && (
+      {view === 'idea' && (
         <main className="single">
-          <HumView onAsk={askClaude} />
+          <div className="subtabs">
+            <button className={ideaTab === 'tap' ? 'on' : ''} onClick={() => setIdeaTab('tap')}>敲节奏</button>
+            <button className={ideaTab === 'hum' ? 'on' : ''} onClick={() => setIdeaTab('hum')}>哼一段</button>
+            <span className="muted">脑子里有拍子就敲出来，有旋律就哼出来，都能存下来再配词。</span>
+          </div>
+          {ideaTab === 'tap' ? <FlowView bpm={bpm} playing={playing} start={start} currentLine={currentLine} /> : <HumView onAsk={askClaude} />}
         </main>
       )}
-      {view === 'refs' && (
+      {view === 'study' && (
         <main className="single">
-          <RefsView refs={refs} setRefs={setRefs} draftTitle={draft.title} sections={analysis.sections.map((x) => x.name).filter((n) => n !== '未命名段落')} />
-        </main>
-      )}
-      {view === 'breakdown' && (
-        <main className="single">
-          <BreakdownView
-            list={breakdowns}
-            setList={setBreakdowns}
-            draftTitle={draft.title}
-            onAsk={askClaude}
-            onPlayGenre={(id) => void playGenre(id)}
-            onUse={(tpl, b) => {
-              setTemplate(tpl)
-              if (b >= 60 && b <= 180) setBpm(b)
-            }}
-          />
+          <div className="subtabs">
+            <button className={studyTab === 'notes' ? 'on' : ''} onClick={() => setStudyTab('notes')}>听歌笔记</button>
+            <button className={studyTab === 'breakdown' ? 'on' : ''} onClick={() => setStudyTab('breakdown')}>拆歌</button>
+            <span className="muted">听歌笔记记“这首歌哪里值得学”，拆歌把一首歌从头到尾分段记清楚。</span>
+          </div>
+          {studyTab === 'notes' ? (
+            <RefsView groups={groups} onBook={(song) => { setBookFocus(song); setView('book') }} refs={refs} setRefs={setRefs} draftTitle={draft.title} sections={analysis.sections.map((x) => x.name).filter((n) => n !== '未命名段落')} onPlayGenre={(id) => void playGenre(id)} />
+          ) : (
+            <BreakdownView
+              list={breakdowns}
+              setList={setBreakdowns}
+              draftTitle={draft.title}
+              onAsk={askClaude}
+              onPlayGenre={(id) => void playGenre(id)}
+              onUse={(tpl, b) => {
+                setTemplate(tpl)
+                if (b >= 60 && b <= 180) setBpm(b)
+              }}
+              onTap={(b) => {
+                if (b >= 60 && b <= 180) setBpm(b)
+                setBeatId('click')
+                setIdeaTab('tap')
+                setView('idea')
+              }}
+            />
+          )}
         </main>
       )}
       {view === 'genres' && (
