@@ -391,3 +391,11 @@ header .drafts { margin-left: auto; }
 .book-cand .chip .w { padding: 2px 4px 2px 8px; }
 .book h3 input { font-size: 13px; font-weight: 400; width: 220px; }
 .book-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 0 14px; }
+
+/* 结构：和规整的歌比 */
+.st-shape { font-size: 13px; color: #c9ccd6; line-height: 1.7; margin: 6px 0; }
+.st-table td small { color: var(--dim); }
+.st-table .note { white-space: normal; line-height: 1.5; }
+.st-table tr.st-short td:nth-child(2), .st-table tr.st-long td:nth-child(2) { color: var(--warn); }
+.st-table .note { color: var(--dim); text-align: left; }
+.st-table tr.st-short .note, .st-table tr.st-long .note { color: var(--warn); }
