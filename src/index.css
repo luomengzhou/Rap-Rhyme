@@ -64,6 +64,7 @@ main.single { overflow: auto; padding: 24px 32px 40px; }
 .backdrop { position: absolute; inset: 0; pointer-events: none; color: var(--ink); }
 .backdrop .line { height: var(--lh); }
 .backdrop .line.header { color: var(--dim); font-size: 14px; letter-spacing: .1em; }
+.backdrop .note { color: #8f86b8; background: #8f86b81f; border-radius: 3px; }
 .backdrop .rh { font-weight: 700; border-bottom: 2px solid; padding-bottom: 1px; }
 .input { position: relative; display: block; background: transparent; color: transparent; caret-color: #fff; resize: none; outline: none !important; border-radius: 0; min-height: 100%; }
 .input::placeholder { color: var(--dim); }

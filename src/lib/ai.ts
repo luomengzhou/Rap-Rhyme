@@ -89,7 +89,7 @@ const RULES = `你是一个说唱写词搭档，在一个写词网站的“改�
 
 /** 组装发给 Claude 的对话：规则和当前草稿放在最前面，后面是页面保存的对话 */
 export function buildInput(title: string, draft: string, turns: Turn[], facts = ''): Turn[] {
-  const head = `${RULES}\n\n草稿标题：${title || '未命名'}\n${facts ? facts + '\n' : ''}\n当前草稿（带 ** 的词是作者标出的想押的词；圆括号里的行是提纲提示）：\n<<<\n${draft.trim() ? draft.slice(0, 20000) : '（还是空的，作者在构思阶段）'}\n>>>`
+  const head = `${RULES}\n\n草稿标题：${title || '未命名'}\n${facts ? facts + '\n' : ''}\n当前草稿（带 ** 的词是作者标出的想押的词；圆括号里的是作者写给自己的释义，说明这一段或这一句想表达什么，不是歌词，不要改它，要顺着它理解立意）：\n<<<\n${draft.trim() ? draft.slice(0, 20000) : '（还是空的，作者在构思阶段）'}\n>>>`
   // 只带最近的对话，免得越聊越长
   return [{ role: 'user', content: head }, ...turns.slice(-16)]
 }

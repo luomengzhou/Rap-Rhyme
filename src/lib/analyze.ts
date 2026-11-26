@@ -8,13 +8,19 @@ export interface LineInfo {
   text: string
   /** 段落标题行，如 [主歌1] */
   header: string | null
-  /** 每个字符所属的押韵组，-1 为没押 */
+  /** 每个字符所属的押韵组，-1 为没押，NOTE 为圆括号里的释义 */
   marks: number[]
   /** 这一行的音节数（汉字 + 估算的英文音节） */
   count: number
   /** 押上的音节占比 */
   density: number
 }
+
+/** marks 里表示“这是圆括号里的释义，不是歌词”的值 */
+export const NOTE = -2
+const PAREN = /[（(][^（()）]*[）)]/g
+/** 把圆括号里的释义换成等长的空格：位置不变，但不参与数字数和找韵 */
+export const stripNotes = (line: string) => line.replace(PAREN, (m) => ' '.repeat(m.length))
 
 export interface Group {
   id: number
@@ -93,12 +99,12 @@ export function analyze(text: string, opt: AnalyzeOptions): Analysis {
 
   raw.forEach((t, line) => {
     const hm = HEADER.exec(t)
-    // 整行都在圆括号里的是提纲提示，不算歌词
-    const note = /^\s*[（(][^）)]*[）)]\s*$/.test(t)
-    const chars = [...t]
+    // 圆括号里的是作者写给自己的释义（这一段想表达什么），不算歌词
+    const lyric = hm ? '' : stripNotes(t)
+    const chars = [...lyric]
     const row: Pos[] = []
-    if (!hm && !note) {
-      const syls = toSyls(t)
+    if (!hm) {
+      const syls = toSyls(lyric)
       let k = 0
       let col = 0
       chars.forEach((c, ci) => {
@@ -121,11 +127,13 @@ export function analyze(text: string, opt: AnalyzeOptions): Analysis {
       if (row.length) row[row.length - 1].lineEnd = true
     }
     rows.push(row)
+    const marks: number[] = new Array(t.length).fill(-1)
+    if (!hm) for (const m of t.matchAll(PAREN)) marks.fill(NOTE, m.index, m.index + m[0].length)
     lines.push({
       text: t,
       header: hm ? hm[1].trim() : null,
-      marks: new Array(t.length).fill(-1),
-      count: hm || note ? 0 : row.length + latinSyllables(t),
+      marks,
+      count: hm ? 0 : row.length + latinSyllables(lyric),
       density: 0,
     })
   })

@@ -23,10 +23,11 @@ export function CheckPanel({ analysis, delivery, setDelivery, bpm, maxPerLine, m
       <h3>唱法</h3>
       <div className="seg wrap">
         {DELIVERIES.map((d) => (
-          <button key={d.id} className={d.id === delivery.id ? 'on' : ''} onClick={() => setDelivery(d.id)}>{d.name}</button>
+          <button key={d.id} className={d.id === delivery.id ? 'on' : ''} onClick={() => setDelivery(d.id)} title={d.name}>{d.en}</button>
         ))}
       </div>
       <dl className="facts">
+        <dt>中文叫法</dt><dd>{delivery.name}</dd>
         <dt>每小节</dt><dd>{delivery.perBar[0]}-{delivery.perBar[1]} 个字（{bpm} BPM 下一小节 {secs.toFixed(1)} 秒）</dd>
         <dt>16 小节主歌</dt><dd>约 {delivery.perBar[0] * 16}-{delivery.perBar[1] * 16} 个字</dd>
         <dt>Hook</dt><dd>{delivery.hook}</dd>

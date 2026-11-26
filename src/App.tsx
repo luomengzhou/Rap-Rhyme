@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { analyze } from './lib/analyze'
 import { beatOf, engine } from './lib/beats'
 import { buildIndex, type Mode, type RhymeIndex } from './lib/rhyme'
-import { barSeconds, DELIVERIES, maxPerLine, REGULAR_TEMPLATE, type SectionTpl } from './lib/styles'
+import { barSeconds, deliveryOf, maxPerLine, REGULAR_TEMPLATE, type SectionTpl } from './lib/styles'
 import { useStored } from './lib/store'
 import { BeatBar } from './components/BeatBar'
 import { CheckPanel } from './components/CheckPanel'
@@ -82,7 +82,7 @@ export default function App() {
       .catch(() => setIndex({ words: [], map: new Map(), set: new Set() }))
   }, [])
 
-  const delivery = DELIVERIES.find((d) => d.id === deliveryId) ?? DELIVERIES[0]
+  const delivery = deliveryOf(deliveryId)
   const limit = maxPerLine(delivery, bpm)
   const analysis = useMemo(
     () => analyze(draft.text, { mode, maxPerLine: limit, barSeconds: barSeconds(bpm), isWord: index ? (w) => index.set.has(w) : undefined }),
@@ -256,7 +256,7 @@ export default function App() {
           key={draft.id}
           title={draft.title}
           text={draft.text}
-          facts={`当前速度 ${bpm} BPM（一小节约 ${barSeconds(bpm).toFixed(1)} 秒），唱法：${delivery.name}。草稿已写 ${written} 小节（一行算一小节），照这个速度约 ${Math.round(written * barSeconds(bpm))} 秒，不含重复的 hook、前奏和间奏。${refNotes}`}
+          facts={`当前速度 ${bpm} BPM（一小节约 ${barSeconds(bpm).toFixed(1)} 秒），唱法：${delivery.en}（${delivery.name}）。草稿已写 ${written} 小节（一行算一小节），照这个速度约 ${Math.round(written * barSeconds(bpm))} 秒，不含重复的 hook、前奏和间奏。${refNotes}`}
           ask={ask}
           clearAsk={() => setAsk('')}
           state={reviews[draft.id]}

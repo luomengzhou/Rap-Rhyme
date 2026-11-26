@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analyze, latinSyllables } from './analyze'
+import { NOTE, analyze, latinSyllables } from './analyze'
 
 const SAMPLE = `曾卖过吸管 屋外是饥寒
 赚的小钱只能给粥加个皮蛋
@@ -63,5 +63,20 @@ describe('节奏码', () => {
     expect(rhythmCode([0, 2, 4, 6, 8, 10])).toBe('6')
     expect(rhythmCode([0, 1, 4, 5, 8, 9, 12, 13, 14])).toBe('2-2-2-3')
     expect(rhythmCode([])).toBe('')
+  })
+})
+
+describe('圆括号里的释义', () => {
+  it('整行和行内的释义都不算歌词', () => {
+    const a = analyze('[主歌1]\n（相遇，像神明一样）\n今晚月色很美（其实是想你）\n今晚月色很美', { mode: 'strict' })
+    expect(a.lines[1].count).toBe(0)
+    expect(a.lines[2].count).toBe(a.lines[3].count)
+    expect(a.sections[0].bars).toBe(2)
+    expect(a.lines[1].marks.every((m) => m === NOTE)).toBe(true)
+    expect(a.lines[2].marks.slice(6).every((m) => m === NOTE)).toBe(true)
+  })
+  it('释义里的字不参与找韵', () => {
+    const a = analyze('走在路上（突破）\n心里很乱（渡过）', { mode: 'strict' })
+    expect(a.groups.length).toBe(0)
   })
 })
