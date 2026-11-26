@@ -4,6 +4,8 @@ import { beatOf, engine } from './lib/beats'
 import { buildIndex, type Mode, type RhymeIndex } from './lib/rhyme'
 import { barSeconds, deliveryOf, maxPerLine, REGULAR_TEMPLATE, type SectionTpl } from './lib/styles'
 import { useStored } from './lib/store'
+import { addBackup, commitVersion, dueForAuto, mergeRevised, replaceText, status, type Draft } from './lib/songs'
+import { HistoryPanel } from './components/HistoryPanel'
 import { BeatBar } from './components/BeatBar'
 import { CheckPanel } from './components/CheckPanel'
 import { Editor } from './components/Editor'
@@ -19,12 +21,6 @@ import { ReviewView, type ReviewState, type Side } from './components/ReviewView
 import type { Material } from './lib/ai'
 import type { RhymeGroup } from './lib/book'
 import { TheoryView } from './components/TheoryView'
-
-interface Draft {
-  id: string
-  title: string
-  text: string
-}
 
 type View = 'write' | 'flow' | 'hum' | 'refs' | 'breakdown' | 'genres' | 'theory'
 
@@ -72,7 +68,42 @@ export default function App() {
   const input = useRef<HTMLTextAreaElement>(null)
 
   const draft = drafts.find((d) => d.id === activeId) ?? drafts[0]
-  const setText = (text: string) => setDrafts(drafts.map((d) => (d.id === draft.id ? { ...d, text } : d)))
+  const patch = (f: (d: Draft) => Draft) => setDrafts((all) => all.map((d) => (d.id === draft.id ? f(d) : d)))
+  /** 改稿子：每次都自动保存；离上次备份够久了就顺手把改之前的样子存一份 */
+  const setText = (text: string) =>
+    patch((d) => {
+      const now = Date.now()
+      return { ...(dueForAuto(d, now) ? addBackup(d, now, true) : d), text }
+    })
+  const [saved, setSaved] = useState('')
+  const flash = (msg: string) => {
+    setSaved(msg)
+    setTimeout(() => setSaved(''), 2500)
+  }
+
+  // 旧版本里“存为新草稿”留下的「某某（改后）（改后）」，收成同一首歌的 V1、V2…，只做一次
+  const [merged, setMerged] = useStored('rr.songsMerged', false)
+  useEffect(() => {
+    if (merged) return
+    setMerged(true)
+    const { drafts: next, moved } = mergeRevised(drafts)
+    if (next.length === drafts.length) return
+    setDrafts(next)
+    if (moved[activeId]) setActiveId(moved[activeId])
+    // 几份草稿各自和 Claude 的对话接在一起，跟着留下来的那一份
+    setReviews((all) => {
+      const out = { ...all }
+      for (const d of drafts) {
+        const to = moved[d.id]
+        if (!to || to === d.id || !out[d.id]) continue
+        const keep = out[to] ?? { review: { title: '', suggestions: [] }, accepted: [], choice: {}, chat: [] }
+        out[to] = { ...keep, chat: [...(out[d.id].chat ?? []), ...(keep.chat ?? [])] }
+        delete out[d.id]
+      }
+      return out
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     fetch(import.meta.env.BASE_URL + 'data/zh-words.txt')
@@ -186,10 +217,10 @@ export default function App() {
           <div className="drafts">
             <select value={draft.id} onChange={(e) => { setActiveId(e.target.value); setConfirmDel(false) }}>
               {drafts.map((d) => (
-                <option key={d.id} value={d.id}>{d.title || '未命名'}</option>
+                <option key={d.id} value={d.id}>{d.title || '未命名'}{d.versions?.length ? ` · V${d.versions.length}` : ''}</option>
               ))}
             </select>
-            <input value={draft.title} onChange={(e) => setDrafts(drafts.map((d) => (d.id === draft.id ? { ...d, title: e.target.value } : d)))} placeholder="标题" />
+            <input value={draft.title} onChange={(e) => patch((d) => ({ ...d, title: e.target.value }))} placeholder="标题" />
             <button
               onClick={() => {
                 const d = newDraft()
@@ -257,12 +288,29 @@ export default function App() {
             else delete next[draft.id]
             setReviews(next)
           }}
-          onWrite={setText}
-          onSaveAsNew={(text) => {
-            const d = { ...newDraft(`${draft.title || '未命名'}（改后）`), text }
-            setDrafts([...drafts, d])
-            setActiveId(d.id)
-          }}
+          onAdopt={(text) => patch((d) => replaceText(d, text, Date.now()))}
+          tools={
+            <>
+              <small className="muted">{saved || `自动保存 · ${status(draft)}`}</small>
+              <button onClick={() => { patch((d) => addBackup(d, Date.now())); flash('已存一份备份') }} title="把现在的样子存一份，不算新版本">存个备份</button>
+              <button
+                className="primary"
+                disabled={!draft.text.trim() || draft.versions?.[draft.versions.length - 1]?.text === draft.text}
+                onClick={() => { patch((d) => commitVersion(d, Date.now())); flash(`已定稿为 V${(draft.versions?.length ?? 0) + 1}`) }}
+                title="写到一个满意的阶段时点一下，像提交一次"
+              >
+                定稿为 V{(draft.versions?.length ?? 0) + 1}
+              </button>
+            </>
+          }
+          history={
+            <HistoryPanel
+              key={draft.id}
+              draft={draft}
+              onRestore={(text) => { patch((d) => replaceText(d, text, Date.now())); flash('已恢复，原来的存了备份') }}
+              onDelete={(kind, i) => patch((d) => ({ ...d, [kind]: (d[kind] ?? []).filter((_, k) => k !== i) }))}
+            />
+          }
         />
       )}
       {view === 'flow' && (

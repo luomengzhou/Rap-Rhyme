@@ -358,3 +358,20 @@ header { flex-wrap: wrap; row-gap: 8px; }
 header .drafts { margin-left: auto; }
 .beatbar { min-width: 0; }
 .beatbar .desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 版本和备份 */
+.work-tools { margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.work-tools small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.work-mode .work-tools button { background: var(--panel-2); border-color: var(--line); color: var(--ink); }
+.work-mode .work-tools button.primary { background: var(--accent); color: #06202e; border-color: transparent; }
+.work-mode .work-tools button:disabled { opacity: .45; }
+.hist { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px minmax(0, 1fr); }
+.hist-list { overflow: auto; padding: 4px 14px 30px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.hist-item { text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; }
+.hist-item.on { border-color: var(--accent); }
+.hist-item small { color: var(--dim); }
+.hist-view { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.hist-bar { display: flex; align-items: center; gap: 10px; padding: 9px 16px; border-bottom: 1px solid var(--line); }
+.hist-bar .primary { margin-left: auto; }
+.hist-text { flex: 1; overflow: auto; margin: 0; padding: 14px 20px 60px; font: inherit; font-size: 16px; line-height: 30px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hist-empty { padding: 20px; }
