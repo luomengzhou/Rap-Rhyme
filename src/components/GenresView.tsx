@@ -20,7 +20,7 @@ export function GenresView({ current, picked, onPlay, onAsk }: Props) {
       <h2>曲风</h2>
       <p className="muted">
         说唱里常见的 {GENRES.length} 种曲风：圈内叫什么、怎么听出来、大概多快。点“听”会用底部的播放条放这种曲风最通用的鼓点骨架，同时把它设成你写词时的 beat。
-        鼓点是浏览器合成的，音色只是示意，真正的味道要去听这个曲风的歌；想找现成的 beat 点“搜 type beat”。
+        鼓声是真实的采样，按曲风分成几套，打法是最通用的骨架，旋律是合成的示意。真正的味道还是要去听这个曲风的歌；想找现成的 beat 点“搜 type beat”。
       </p>
       <input id="genre-q" className="q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜名字或感觉，比如 drill、牛铃、迷幻、慢" />
       {FAMILIES.map((f) => {
