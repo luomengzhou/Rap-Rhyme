@@ -47,6 +47,8 @@ interface Props {
   history: ReactNode
   /** 给 Claude 的背景数据，如 BPM、小节数 */
   facts: string
+  /** 按这次的问题去找韵工具里查候选词，交给 Claude */
+  rhymeFacts?: (question: string) => string
   /** 从别的页面带过来、要自动发出的问题 */
   ask: string
   clearAsk: () => void
@@ -210,7 +212,7 @@ function inline(a: string, b: string): [string, string, string, string, string] 
   return [a.slice(0, p), a.slice(p, a.length - s), b.slice(p, b.length - s), a.slice(a.length - s), b.slice(0, p)]
 }
 
-export function ReviewView({ id, editor, panels, side: tab, setSide: setTab, title, text, state, setState, materials: saved, setMaterials, groups, setGroups, onAdopt, tools, history, facts, ask, clearAsk }: Props) {
+export function ReviewView({ id, editor, panels, side: tab, setSide: setTab, title, text, state, setState, materials: saved, setMaterials, groups, setGroups, onAdopt, tools, history, facts, rhymeFacts, ask, clearAsk }: Props) {
   const cur: ReviewState = state ?? { review: { title: `${title || '未命名'} · 改稿`, suggestions: [] }, accepted: [], choice: {}, chat: [] }
   const { review, accepted, choice } = cur
   const chat = cur.chat ?? []
@@ -334,7 +336,7 @@ export function ReviewView({ id, editor, panels, side: tab, setSide: setTab, tit
     ctl.current = new AbortController()
     let answer = ''
     try {
-      const res = await sample(buildInput(title, text, turns, facts + matNotes), {
+      const res = await sample(buildInput(title, text, turns, facts + matNotes + (rhymeFacts?.(content) ?? '')), {
         cache: false,
         signal: ctl.current.signal,
         onText: ({ text: t }) => setStreaming(splitReply(t).text),

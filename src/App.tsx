@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { analyze } from './lib/analyze'
 import { beatOf, engine } from './lib/beats'
 import { buildIndex, type Mode, type RhymeIndex } from './lib/rhyme'
+import { loadEn, type EnIndex } from './lib/en'
+import { rhymeFacts } from './lib/rhymeFacts'
 import { barSeconds, deliveryOf, maxPerLine, REGULAR_TEMPLATE, type SectionTpl } from './lib/styles'
 import { useStored } from './lib/store'
 import { addBackup, commitVersion, dueForAuto, mergeRevised, replaceText, status, type Draft } from './lib/songs'
@@ -193,6 +195,20 @@ export default function App() {
   const refNotes = mine.length
     ? '\n作者记的听歌笔记（这首歌的和全局的，参考手法用）：\n' + mine.map((r) => `- ${r.song}${r.artist ? ' / ' + r.artist : ''}${r.at ? '，位置 ' + r.at : ''}${r.fit ? '，适合 ' + r.fit : ''}${r.note ? '，' + r.note : ''}`).join('\n')
     : ''
+  // 草稿或正在查的词里有英文时，把英文词典也备好，Claude 才拿得到英文的候选词
+  const [enIdx, setEnIdx] = useState<EnIndex | null>(null)
+  const hasLatin = /[a-z]{2}/i.test(draft.text + query)
+  useEffect(() => {
+    if (!hasLatin || enIdx) return
+    let live = true
+    loadEn(import.meta.env.BASE_URL).then((i) => live && setEnIdx(i), () => {})
+    return () => { live = false }
+  }, [hasLatin, enIdx])
+  const rhymeFor = (question: string) => {
+    let extra: Record<string, string> = {}
+    try { extra = JSON.parse(localStorage.getItem('rr.enSaid') ?? '{}') } catch { /* 读不到就不用 */ }
+    return rhymeFacts({ text: draft.text, question, query, liked, blocked, index, enIdx, extra })
+  }
   const askClaude = (q: string) => {
     setAsk(q)
     setSide('chat')
@@ -279,6 +295,7 @@ export default function App() {
           title={draft.title}
           text={draft.text}
           facts={`当前速度 ${bpm} BPM（一小节约 ${barSeconds(bpm).toFixed(1)} 秒），唱法：${delivery.en}（${delivery.name}）。草稿已写 ${written} 小节（一行算一小节），照这个速度约 ${Math.round(written * barSeconds(bpm))} 秒，不含重复的 hook、前奏和间奏。${refNotes}`}
+          rhymeFacts={rhymeFor}
           ask={ask}
           clearAsk={() => setAsk('')}
           state={reviews[draft.id]}

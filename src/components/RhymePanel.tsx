@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import { getSample } from '../lib/ai'
+import { rhymeAskPrompt } from '../lib/rhymeFacts'
 import { cleanPhones, enKey, findEn, isEnglish, loadEn, parseSaid, pronounce, sayPrompt, syllables, type EnIndex } from '../lib/en'
 import { useStored } from '../lib/store'
 import { addItems, matchGroups, parseItems, sourceOf, type RhymeGroup } from '../lib/book'
@@ -244,6 +245,14 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
       {!en && index && syls.length > 0 && hits.length === 0 && (
         <p className="muted">
           词库里没有常用词能{N_LABEL[useN]}上这个词。{useN >= 3 ? '三押以上的现成词本来就少，说唱里多半是几个词拼成的短语。可以先找双押，或者打开“含宽押”。' : '可以试试“含宽押”或“生僻词”。'}
+        </p>
+      )}
+      {onAsk && hits.length > 0 && (
+        <p className="muted">
+          <button type="button" className="link" title="把查的词、你点了♥的词和排在前面的候选发给 Claude，让它看草稿里哪几句能顺着这个韵改" onClick={() => onAsk(rhymeAskPrompt(query, hits.filter((h) => likedSet.has(h.w)).map((h) => h.w), hits.filter((h) => !likedSet.has(h.w)).slice(0, 30).map((h) => h.w)))}>
+            让 Claude 用这些词帮我改
+          </button>
+          {' '}先点 ♥ 标出你喜欢的，它会优先用。
         </p>
       )}
       <div className="chips">
