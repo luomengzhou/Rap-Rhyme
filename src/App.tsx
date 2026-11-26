@@ -15,7 +15,7 @@ import { BreakdownView } from './components/BreakdownView'
 import { GenresView } from './components/GenresView'
 import type { Breakdown } from './lib/breakdown'
 import { RefsView, type SongRef } from './components/RefsView'
-import { ReviewView, type ReviewState } from './components/ReviewView'
+import { ReviewView, type ReviewState, type Side } from './components/ReviewView'
 import type { Material } from './lib/ai'
 import type { RhymeGroup } from './lib/book'
 import { TheoryView } from './components/TheoryView'
@@ -26,8 +26,7 @@ interface Draft {
   text: string
 }
 
-type View = 'write' | 'review' | 'flow' | 'hum' | 'refs' | 'breakdown' | 'genres' | 'theory'
-type Side = 'check' | 'rhyme' | 'structure'
+type View = 'write' | 'flow' | 'hum' | 'refs' | 'breakdown' | 'genres' | 'theory'
 
 /** 把以前跟着各份草稿存的素材收到一起，同一条只留一份 */
 function gatherMaterials(reviews: Record<string, ReviewState>): Material[] {
@@ -160,7 +159,8 @@ export default function App() {
     : ''
   const askClaude = (q: string) => {
     setAsk(q)
-    setView('review')
+    setSide('chat')
+    setView('write')
   }
   const picked = sel.text.trim()
   const currentLine = useMemo(() => {
@@ -175,7 +175,6 @@ export default function App() {
         <h1>Rap Rhyme<small>写词工作台</small></h1>
         <nav>
           <button className={view === 'write' ? 'on' : ''} onClick={() => setView('write')}>写词</button>
-          <button className={view === 'review' ? 'on' : ''} onClick={() => setView('review')}>改稿</button>
           <button className={view === 'flow' ? 'on' : ''} onClick={() => setView('flow')}>打拍</button>
           <button className={view === 'hum' ? 'on' : ''} onClick={() => setView('hum')}>哼唱</button>
           <button className={view === 'refs' ? 'on' : ''} onClick={() => setView('refs')}>听歌笔记</button>
@@ -183,7 +182,7 @@ export default function App() {
           <button className={view === 'genres' ? 'on' : ''} onClick={() => setView('genres')}>曲风</button>
           <button className={view === 'theory' ? 'on' : ''} onClick={() => setView('theory')}>乐理卡</button>
         </nav>
-        {(view === 'write' || view === 'review' || view === 'refs') && (
+        {(view === 'write' || view === 'refs') && (
           <div className="drafts">
             <select value={draft.id} onChange={(e) => { setActiveId(e.target.value); setConfirmDel(false) }}>
               {drafts.map((d) => (
@@ -222,38 +221,26 @@ export default function App() {
       </header>
 
       {view === 'write' && (
-        <main className="write">
-          <section className="left">
-            <Editor text={draft.text} analysis={analysis} maxPerLine={limit} onChange={setText} onSelect={setSel} inputRef={input} />
-            {HAN.test(picked) && (
-              <button className="float" onMouseDown={(e) => e.preventDefault()} onClick={() => lookup(picked)}>
-                找「{picked}」的韵
-              </button>
-            )}
-          </section>
-          <aside>
-            <div className="tabs">
-              <button className={side === 'check' ? 'on' : ''} onClick={() => setSide('check')}>检查</button>
-              <button className={side === 'rhyme' ? 'on' : ''} onClick={() => setSide('rhyme')}>找韵</button>
-              <button className={side === 'structure' ? 'on' : ''} onClick={() => setSide('structure')}>结构</button>
-            </div>
-            <div className="pane">
-              {side === 'check' && (
-                <CheckPanel analysis={analysis} delivery={delivery} setDelivery={setDeliveryId} bpm={bpm} maxPerLine={limit} mode={mode} setMode={setMode} onWord={lookup} onJump={jump} />
-              )}
-              {side === 'rhyme' && (
-                <RhymePanel index={index} query={query} setQuery={setQuery} mode={mode} setMode={setMode} blocked={blocked} setBlocked={setBlocked} liked={liked} setLiked={setLiked} onPick={insert} groups={groups} setGroups={setGroups} onAsk={askClaude} />
-              )}
-              {side === 'structure' && (
-                <StructurePanel beatId={beatId} onAsk={askClaude} analysis={analysis} template={template} setTemplate={setTemplate} bpm={bpm} onInsert={insertTemplate} onJump={jump} />
-              )}
-            </div>
-          </aside>
-        </main>
-      )}
-      {view === 'review' && (
         <ReviewView
           key={draft.id}
+          id={draft.id}
+          side={side}
+          setSide={setSide}
+          editor={
+            <div className="left">
+              <Editor text={draft.text} analysis={analysis} maxPerLine={limit} onChange={setText} onSelect={setSel} inputRef={input} />
+              {HAN.test(picked) && (
+                <button className="float" onMouseDown={(e) => e.preventDefault()} onClick={() => lookup(picked)}>
+                  找「{picked}」的韵
+                </button>
+              )}
+            </div>
+          }
+          panels={{
+            check: <CheckPanel analysis={analysis} delivery={delivery} setDelivery={setDeliveryId} bpm={bpm} maxPerLine={limit} mode={mode} setMode={setMode} onWord={lookup} onJump={jump} />,
+            rhyme: <RhymePanel index={index} query={query} setQuery={setQuery} mode={mode} setMode={setMode} blocked={blocked} setBlocked={setBlocked} liked={liked} setLiked={setLiked} onPick={insert} groups={groups} setGroups={setGroups} onAsk={askClaude} />,
+            structure: <StructurePanel beatId={beatId} onAsk={askClaude} analysis={analysis} template={template} setTemplate={setTemplate} bpm={bpm} onInsert={insertTemplate} onJump={jump} />,
+          }}
           title={draft.title}
           text={draft.text}
           facts={`当前速度 ${bpm} BPM（一小节约 ${barSeconds(bpm).toFixed(1)} 秒），唱法：${delivery.en}（${delivery.name}）。草稿已写 ${written} 小节（一行算一小节），照这个速度约 ${Math.round(written * barSeconds(bpm))} 秒，不含重复的 hook、前奏和间奏。${refNotes}`}
@@ -275,7 +262,6 @@ export default function App() {
             const d = { ...newDraft(`${draft.title || '未命名'}（改后）`), text }
             setDrafts([...drafts, d])
             setActiveId(d.id)
-            setView('write')
           }}
         />
       )}
