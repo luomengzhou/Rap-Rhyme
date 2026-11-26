@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { analyze } from './lib/analyze'
-import { BEATS, engine } from './lib/beats'
+import { beatOf, engine } from './lib/beats'
 import { buildIndex, type Mode, type RhymeIndex } from './lib/rhyme'
 import { barSeconds, DELIVERIES, maxPerLine, REGULAR_TEMPLATE, type SectionTpl } from './lib/styles'
 import { useStored } from './lib/store'
@@ -8,10 +8,16 @@ import { BeatBar } from './components/BeatBar'
 import { CheckPanel } from './components/CheckPanel'
 import { Editor } from './components/Editor'
 import { FlowView } from './components/FlowView'
+import { HumView } from './components/HumView'
 import { RhymePanel } from './components/RhymePanel'
 import { StructurePanel } from './components/StructurePanel'
+import { BreakdownView } from './components/BreakdownView'
+import { GenresView } from './components/GenresView'
+import type { Breakdown } from './lib/breakdown'
 import { RefsView, type SongRef } from './components/RefsView'
 import { ReviewView, type ReviewState } from './components/ReviewView'
+import type { Material } from './lib/ai'
+import type { RhymeGroup } from './lib/book'
 import { TheoryView } from './components/TheoryView'
 
 interface Draft {
@@ -20,8 +26,22 @@ interface Draft {
   text: string
 }
 
-type View = 'write' | 'review' | 'flow' | 'refs' | 'theory'
+type View = 'write' | 'review' | 'flow' | 'hum' | 'refs' | 'breakdown' | 'genres' | 'theory'
 type Side = 'check' | 'rhyme' | 'structure'
+
+/** 把以前跟着各份草稿存的素材收到一起，同一条只留一份 */
+function gatherMaterials(reviews: Record<string, ReviewState>): Material[] {
+  const seen = new Set<string>()
+  return Object.values(reviews)
+    .flatMap((r) => r?.materials ?? [])
+    .filter((m) => {
+      const k = m.title + '\n' + m.text
+      if (seen.has(m.id) || seen.has(k)) return false
+      seen.add(m.id)
+      seen.add(k)
+      return true
+    })
+}
 
 const newDraft = (title = '新草稿'): Draft => ({ id: Math.random().toString(36).slice(2, 10), title, text: '' })
 const HAN = /^[一-鿿]{1,6}$/
@@ -40,6 +60,10 @@ export default function App() {
   const [template, setTemplate] = useStored<SectionTpl[]>('rr.template', REGULAR_TEMPLATE)
   const [refs, setRefs] = useStored<SongRef[]>('rr.refs', [])
   const [reviews, setReviews] = useStored<Record<string, ReviewState>>('rr.reviews', {})
+  const [groups, setGroups] = useStored<RhymeGroup[]>('rr.rhymeGroups', [])
+  const [breakdowns, setBreakdowns] = useStored<Breakdown[]>('rr.breakdowns', [])
+  // 素材所有草稿共用。以前是跟着每份草稿存的，第一次打开时把它们收到一起
+  const [materials, setMaterials] = useStored<Material[]>('rr.materials', gatherMaterials(reviews))
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState<RhymeIndex | null>(null)
   const [playing, setPlaying] = useState(false)
@@ -71,7 +95,7 @@ export default function App() {
   }, [bpm, playing])
   useEffect(() => engine.onStep((i) => i === -1 && setPlaying(false)), [])
   const start = useCallback(async () => {
-    await engine.start(BEATS.find((b) => b.id === beatId) ?? BEATS[0], bpm)
+    await engine.start(beatOf(beatId), bpm)
     setPlaying(true)
   }, [beatId, bpm])
   const toggle = () => {
@@ -85,6 +109,19 @@ export default function App() {
     // 只在换 beat 时重启
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [beatId])
+
+  /** 试听某个曲风：换成它的鼓点和速度并开始放；正在放的就是它时停下 */
+  const playGenre = async (id: string) => {
+    const b = beatOf(id)
+    if (playing && beatId === b.id) {
+      engine.stop()
+      return setPlaying(false)
+    }
+    setBeatId(b.id)
+    setBpm(b.bpm)
+    await engine.start(b, b.bpm)
+    setPlaying(true)
+  }
 
   const lookup = (w: string) => {
     setQuery(w)
@@ -140,7 +177,10 @@ export default function App() {
           <button className={view === 'write' ? 'on' : ''} onClick={() => setView('write')}>写词</button>
           <button className={view === 'review' ? 'on' : ''} onClick={() => setView('review')}>改稿</button>
           <button className={view === 'flow' ? 'on' : ''} onClick={() => setView('flow')}>打拍</button>
+          <button className={view === 'hum' ? 'on' : ''} onClick={() => setView('hum')}>哼唱</button>
           <button className={view === 'refs' ? 'on' : ''} onClick={() => setView('refs')}>听歌笔记</button>
+          <button className={view === 'breakdown' ? 'on' : ''} onClick={() => setView('breakdown')}>拆歌</button>
+          <button className={view === 'genres' ? 'on' : ''} onClick={() => setView('genres')}>曲风</button>
           <button className={view === 'theory' ? 'on' : ''} onClick={() => setView('theory')}>乐理卡</button>
         </nav>
         {(view === 'write' || view === 'review' || view === 'refs') && (
@@ -202,7 +242,7 @@ export default function App() {
                 <CheckPanel analysis={analysis} delivery={delivery} setDelivery={setDeliveryId} bpm={bpm} maxPerLine={limit} mode={mode} setMode={setMode} onWord={lookup} onJump={jump} />
               )}
               {side === 'rhyme' && (
-                <RhymePanel index={index} query={query} setQuery={setQuery} mode={mode} setMode={setMode} blocked={blocked} setBlocked={setBlocked} liked={liked} setLiked={setLiked} onPick={insert} />
+                <RhymePanel index={index} query={query} setQuery={setQuery} mode={mode} setMode={setMode} blocked={blocked} setBlocked={setBlocked} liked={liked} setLiked={setLiked} onPick={insert} groups={groups} setGroups={setGroups} onAsk={askClaude} />
               )}
               {side === 'structure' && (
                 <StructurePanel beatId={beatId} onAsk={askClaude} analysis={analysis} template={template} setTemplate={setTemplate} bpm={bpm} onInsert={insertTemplate} onJump={jump} />
@@ -220,6 +260,10 @@ export default function App() {
           ask={ask}
           clearAsk={() => setAsk('')}
           state={reviews[draft.id]}
+          materials={materials}
+          setMaterials={setMaterials}
+          groups={groups}
+          setGroups={setGroups}
           setState={(s) => {
             const next = { ...reviews }
             if (s) next[draft.id] = s
@@ -240,9 +284,34 @@ export default function App() {
           <FlowView bpm={bpm} playing={playing} start={start} currentLine={currentLine} />
         </main>
       )}
+      {view === 'hum' && (
+        <main className="single">
+          <HumView onAsk={askClaude} />
+        </main>
+      )}
       {view === 'refs' && (
         <main className="single">
           <RefsView refs={refs} setRefs={setRefs} draftTitle={draft.title} sections={analysis.sections.map((x) => x.name).filter((n) => n !== '未命名段落')} />
+        </main>
+      )}
+      {view === 'breakdown' && (
+        <main className="single">
+          <BreakdownView
+            list={breakdowns}
+            setList={setBreakdowns}
+            draftTitle={draft.title}
+            onAsk={askClaude}
+            onPlayGenre={(id) => void playGenre(id)}
+            onUse={(tpl, b) => {
+              setTemplate(tpl)
+              if (b >= 60 && b <= 180) setBpm(b)
+            }}
+          />
+        </main>
+      )}
+      {view === 'genres' && (
+        <main className="single">
+          <GenresView current={playing ? beatId : ''} picked={beatId} onPlay={(id) => void playGenre(id)} onAsk={askClaude} />
         </main>
       )}
       {view === 'theory' && (

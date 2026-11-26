@@ -1,5 +1,6 @@
 // 用 Tone.js 在浏览器里合成示例 loop，不使用任何现成的歌或采样。
 import * as Tone from 'tone'
+import { GENRES } from './genres'
 
 export interface Beat {
   id: string
@@ -17,55 +18,18 @@ export interface Beat {
   swing?: number
 }
 
+/** 底部播放条能选的 beat：一个节拍器，加上曲风表里每种曲风的鼓点骨架 */
 export const BEATS: Beat[] = [
   {
     id: 'click', name: '节拍器', mood: '只要拍子', bpm: 90, desc: '只有拍点，练打拍用',
     kick: 'x...............x...............', snare: '................................',
     hat: 'x...x...x...x...x...x...x...x...', bass: {}, lead: {},
   },
-  {
-    id: 'dark-trap', name: '暗黑 trap', mood: '暗黑', bpm: 140, desc: '小调、低沉 808，half-time 听感很慢',
-    kick: 'x.....x...x.....x......x..x.....', snare: '........x...............x.......',
-    hat: 'x.x.x.x.x.xxx.x.x.x.x.x.x.x.xxxx',
-    bass: { 0: 'C1', 6: 'C1', 10: 'C1', 16: 'G#0', 23: 'G#0', 26: 'A#0' },
-    lead: { 0: 'C4', 4: 'D#4', 8: 'G4', 12: 'D#4', 16: 'G#3', 20: 'C4', 24: 'D#4', 28: 'D4' },
-  },
-  {
-    id: 'boombap-playful', name: '戏谑 boom bap', mood: '戏谑 / 嘲讽', bpm: 92, desc: '跳跃的拨弦旋律，鼓点松弛',
-    kick: 'x......x..x.....x..x......x.....', snare: '....x.......x.......x.......x...',
-    hat: 'x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.', swing: 0.35,
-    bass: { 0: 'E1', 7: 'E1', 10: 'G1', 16: 'A1', 19: 'A1', 26: 'B1' },
-    lead: { 0: 'E4', 3: 'G4', 6: 'B4', 8: 'A#4', 14: 'G4', 16: 'A4', 19: 'C5', 22: 'E5', 24: 'D#5', 30: 'B4' },
-  },
-  {
-    id: 'dark-playful', name: '暗黑 + 戏谑', mood: '暗黑 + 戏谑', bpm: 90, desc: '阴森但有跳跃感，马戏团 / 鬼屋色彩',
-    kick: 'x.....x.x.......x.....x.x..x....', snare: '....x.......x.......x.......x.x.',
-    hat: 'x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.', swing: 0.25,
-    bass: { 0: 'D1', 6: 'D1', 8: 'F1', 16: 'A#0', 22: 'A#0', 24: 'A0' },
-    lead: { 0: 'D4', 2: 'F4', 4: 'A4', 6: 'G#4', 8: 'A4', 12: 'F4', 16: 'A#3', 18: 'D4', 20: 'F4', 22: 'E4', 24: 'C#4', 28: 'A3' },
-  },
-  {
-    id: 'brag-trap', name: '张扬 trap', mood: '嚣张 / 自信', bpm: 150, desc: '密集 hi-hat，适合三连音 flow',
-    kick: 'x..x......x.....x..x......x..x..', snare: '........x...............x.......',
-    hat: 'xxx.xxx.x.xxxxx.xxx.xxx.x.xxxxxx',
-    bass: { 0: 'F1', 3: 'F1', 10: 'F1', 16: 'D#1', 19: 'D#1', 26: 'C1', 29: 'C1' },
-    lead: { 0: 'F4', 8: 'G#4', 16: 'D#4', 24: 'C4' },
-  },
-  {
-    id: 'chill', name: 'chill boom bap', mood: '松弛 / 日常', bpm: 85, desc: '温柔的和弦，蛋堡式的说话感',
-    kick: 'x.........x.....x.......x.x.....', snare: '....x.......x.......x.......x...',
-    hat: 'x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.', swing: 0.4,
-    bass: { 0: 'F1', 10: 'F1', 16: 'D1', 24: 'G1', 26: 'C1' },
-    lead: { 0: 'A4', 4: 'C5', 8: 'E5', 12: 'C5', 16: 'F4', 20: 'A4', 24: 'B4', 28: 'G4' },
-  },
-  {
-    id: 'melodic', name: '抒情', mood: '抒情', bpm: 78, desc: '慢速、长音旋律，留给唱的空间',
-    kick: 'x...............x.....x.........', snare: '........x...............x.......',
-    hat: 'x...x...x...x...x...x...x...x...',
-    bass: { 0: 'A1', 16: 'F1', 24: 'G1' },
-    lead: { 0: 'E4', 6: 'A4', 12: 'C5', 16: 'A4', 22: 'F4', 24: 'G4', 28: 'E4' },
-  },
+  ...GENRES.map((g) => g.beat),
 ]
+
+/** 按 id 找 beat；以前存的旧名字找不到时退回 boom bap */
+export const beatOf = (id: string) => BEATS.find((b) => b.id === id) ?? BEATS.find((b) => b.id === 'boom-bap') ?? BEATS[0]
 
 type StepFn = (step: number) => void
 
@@ -154,6 +118,38 @@ class Engine {
     t.position = 0
     this.playing = false
     this.listeners.forEach((fn) => fn(-1))
+  }
+
+  /** 回放哼唱分析出来的节奏：咚 / 哒 / 叮各用选定的音色，重音更响 */
+  async playSteps(bpm: number, steps: { step: number; kind: 'low' | 'mid' | 'high'; accent: boolean }[], sounds: { low: string; mid: string; high: string }) {
+    await Tone.start()
+    this.init()
+    this.stop()
+    const now = Tone.now() + 0.08
+    const unit = 15 / bpm
+    for (const s of steps) {
+      const at = now + s.step * unit
+      const vel = s.accent ? 1 : 0.55
+      if (s.kind === 'low') {
+        if (sounds.low === '808') this.bass.triggerAttackRelease('C1', 0.45, at, vel)
+        else this.kick.triggerAttackRelease('C1', '8n', at, vel)
+      } else if (s.kind === 'mid') {
+        if (sounds.mid === 'rim') this.click.triggerAttackRelease('G5', '32n', at, vel)
+        else this.snare.triggerAttackRelease('16n', at, vel)
+      } else if (sounds.high === 'hat') this.hat.triggerAttackRelease('32n', at, vel)
+      else this.lead.triggerAttackRelease('C6', 0.4, at, vel)
+    }
+  }
+
+  /** 回放识别出来的旋律：notes 的时间是秒，音高是 MIDI 编号 */
+  async playNotes(notes: { start: number; dur: number; midi: number; amp: number }[]) {
+    await Tone.start()
+    this.init()
+    this.stop()
+    if (!notes.length) return
+    const now = Tone.now() + 0.08
+    const t0 = notes[0].start
+    for (const n of notes) this.lead.triggerAttackRelease(Tone.Frequency(n.midi, 'midi').toFrequency(), Math.max(0.08, n.dur), now + n.start - t0, 0.4 + n.amp * 0.5)
   }
 
   /** 乐理卡里的小示范：按给定的格子敲击，accent 为重音位置 */

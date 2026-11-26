@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildInput, errorText, getSample, splitReply, translatePrompt, type Material, type Sample, type Turn } from '../lib/ai'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { addItems, markLine, type RhymeGroup } from '../lib/book'
+import { colorOf } from '../lib/palette'
+import { buildInput, errorText, getSample, GLOSS_MAX_LINES, glossPrompt, locateGloss, splitReply, translatePrompt, type Material, type Sample, type Turn } from '../lib/ai'
 import { applyReview, diffLines, parseReview, type Review, type Status } from '../lib/review'
 
 export interface ReviewState {
@@ -7,6 +9,8 @@ export interface ReviewState {
   accepted: string[]
   choice: Record<string, number>
   chat?: Turn[]
+  /** 自己动手改过的“改后”全文；有它的时候，改后稿以它为准 */
+  manual?: string
   /** 收藏的素材 */
   materials?: Material[]
 }
@@ -16,6 +20,12 @@ interface Props {
   text: string
   state: ReviewState | undefined
   setState: (s: ReviewState | undefined) => void
+  /** 收藏的素材，所有草稿共用 */
+  materials: Material[]
+  setMaterials: Dispatch<SetStateAction<Material[]>>
+  /** 韵脚本，和写词页共用 */
+  groups: RhymeGroup[]
+  setGroups: Dispatch<SetStateAction<RhymeGroup[]>>
   onSaveAsNew: (text: string) => void
   /** 草稿还是空的时候，直接把提纲写进去 */
   onWrite: (text: string) => void
@@ -58,16 +68,51 @@ interface CardProps {
   onToggle: () => void
   onEdit?: () => void
   onTranslate?: () => void
-  /** 正在翻译时已经写出来的部分 */
+  /** 正在讲解时已经写出来的部分 */
   live?: string | null
+  /** 翻译划出来的几句 */
+  onGloss?: (src: string, at: number) => void
+  onDropGloss?: (at: number) => void
+  /** 正在翻译的那几句：最后一行的行号和已经写出来的部分 */
+  glossing?: { at: number; text: string } | null
+  /** 从这张卡片里记下来的韵组，用来上色 */
+  groups?: RhymeGroup[]
+  /** 把划中的词记进一组韵；group 为空就新开一组 */
+  onRhyme?: (word: string, group: string | null) => void
 }
 
-function MaterialCard({ m, saved, onToggle, onEdit, onTranslate, live }: CardProps) {
+/** 原文里有没有需要翻译的外文 */
+const foreign = (t: string) => /[A-Za-z\u3040-\u30ff\uac00-\ud7af]{2}/.test(t)
+
+/** 去掉 Claude 偶尔带上的 Markdown 星号、井号，段落名单独加粗 */
+function Plain({ text }: { text: string }) {
+  return (
+    <>
+      {text.split('\n').map((l, i) => {
+        const head = /^\s*(\*\*.+\*\*|#+\s.+)\s*$/.test(l)
+        const clean = l.replace(/\*\*/g, '').replace(/^\s*#+\s*/, '')
+        return clean.trim() ? <div key={i} className={head ? 'mat-h' : undefined}>{clean}</div> : <div key={i} className="mat-gap" />
+      })}
+    </>
+  )
+}
+
+function MaterialCard({ m, saved, onToggle, onEdit, onTranslate, live, onGloss, onDropGloss, glossing, groups = [], onRhyme }: CardProps) {
   const tr = live ?? m.translation ?? ''
-  const src = m.text.split('\n')
-  const dst = tr.split('\n')
-  // 行数对得上就一行原文一行译文地排，对不上就整段放在下面
-  const paired = tr && live == null && src.length === dst.length
+  const lines = m.text.split('\n')
+  const box = useRef<HTMLDivElement>(null)
+  const [sel, setSel] = useState<{ src: string; at: number; n: number; word: string } | null>(null)
+  const pick = () => {
+    const s = window.getSelection()
+    const el = box.current
+    if (!s || s.isCollapsed || !el || !s.anchorNode || !s.focusNode || !el.contains(s.anchorNode) || !el.contains(s.focusNode)) return setSel(null)
+    const raw = s.toString()
+    const hit = locateGloss(m.text, raw)
+    // 一行以内、不太长的一小段，可以记成韵脚
+    const word = raw.trim()
+    setSel(hit ? { ...hit, n: hit.src.split('\n').length, word: !word.includes('\n') && word.length <= 40 ? word : '' } : null)
+  }
+  const glossAt = (i: number) => (glossing?.at === i ? { zh: glossing.text, live: true } : m.glosses?.find((g) => g.at === i))
   return (
     <article className={`mat${saved ? ' on' : ''}`}>
       <div className="sug-head">
@@ -75,19 +120,65 @@ function MaterialCard({ m, saved, onToggle, onEdit, onTranslate, live }: CardPro
         <b>{m.title}</b>
       </div>
       {m.source && <div className="mat-src">{m.source}</div>}
-      {m.text && !paired && <p className="mat-text">{m.text}</p>}
-      {paired && (
-        <div className="mat-text mat-pair">
-          {src.map((l, i) => (l.trim() ? <div key={i}><span>{l}</span><em>{dst[i]}</em></div> : <br key={i} />))}
+      {m.text && (
+        <div className="mat-text" ref={box} onMouseUp={pick} onKeyUp={pick}>
+          {lines.map((l, i) => {
+            const g = glossAt(i)
+            return (
+              <div key={i}>
+                {l.trim() ? <div>{groups.length ? markLine(l, groups).map((sg, k) => (sg.group < 0 ? sg.text : <mark key={k} className="rh" style={{ borderColor: colorOf(groups[sg.group].color), color: colorOf(groups[sg.group].color) }}>{sg.text}</mark>)) : l}</div> : <div className="mat-gap" />}
+                {g && (
+                  <div className="mat-gloss">
+                    {g.zh ? <Plain text={g.zh} /> : <span className="muted">正在翻译…</span>}
+                    {onDropGloss && !('live' in g) && <button className="link" title="去掉这段翻译" onClick={() => onDropGloss(i)}>×</button>}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
-      {tr && !paired && <p className="mat-text mat-tr">{tr}</p>}
-      {live === '' && <p className="muted">正在翻译…</p>}
+      {sel && (
+        <div className="row tight mat-pick">
+          {onGloss && foreign(sel.src) && (
+            sel.n > GLOSS_MAX_LINES ? (
+              <span className="muted">划了 {sel.n} 行，一次最多翻译 {GLOSS_MAX_LINES} 行。</span>
+            ) : (
+              <button className="primary" disabled={!!glossing} onClick={() => { onGloss(sel.src, sel.at); setSel(null); window.getSelection()?.removeAllRanges() }}>翻译划中的这 {sel.n} 行</button>
+            )
+          )}
+          {onRhyme && sel.word && (
+            <>
+              <span className="muted">把“{sel.word}”记成韵脚：</span>
+              {groups.map((g) => (
+                <button key={g.id} className="rh-pick" style={{ borderColor: colorOf(g.color) }} title={g.items.join(' / ')} onClick={() => { onRhyme(sel.word, g.id); setSel(null); window.getSelection()?.removeAllRanges() }}>
+                  和 {g.items[0]} 一组
+                </button>
+              ))}
+              <button onClick={() => { onRhyme(sel.word, null); setSel(null); window.getSelection()?.removeAllRanges() }}>新的一组</button>
+            </>
+          )}
+        </div>
+      )}
+      {groups.length > 0 && (
+        <div className="rh-groups">
+          {groups.map((g) => (
+            <div key={g.id} style={{ borderColor: colorOf(g.color) }}>{g.items.join(' / ')}</div>
+          ))}
+        </div>
+      )}
+      {tr && (
+        <details className="mat-tr" open={live != null}>
+          <summary>整段大意</summary>
+          <Plain text={tr} />
+        </details>
+      )}
+      {live === '' && <p className="muted">正在读…</p>}
       {m.use && <p>{m.use}</p>}
       <div className="row tight">
         <button className={saved ? 'primary' : ''} onClick={onToggle}>{saved ? (onEdit ? '取消收藏' : '已收藏') : '收藏'}</button>
         {onEdit && <button className="link" onClick={onEdit}>改</button>}
-        {onTranslate && m.text.trim() && <button className="link" disabled={live != null} onClick={onTranslate}>{m.translation ? '重新翻译' : '翻译成中文'}</button>}
+        {onTranslate && foreign(m.text) && <button className="link" disabled={live != null} onClick={onTranslate}>{m.translation ? '重新讲一遍大意' : '讲讲整段大意'}</button>}
         <a className="right" href={searchUrl(m)} target="_blank" rel="noreferrer">搜原文核对</a>
       </div>
     </article>
@@ -103,21 +194,21 @@ function inline(a: string, b: string): [string, string, string, string, string] 
   return [a.slice(0, p), a.slice(p, a.length - s), b.slice(p, b.length - s), a.slice(a.length - s), b.slice(0, p)]
 }
 
-export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite, facts, ask, clearAsk }: Props) {
+export function ReviewView({ title, text, state, setState, materials: saved, setMaterials, groups, setGroups, onSaveAsNew, onWrite, facts, ask, clearAsk }: Props) {
   const cur: ReviewState = state ?? { review: { title: `${title || '未命名'} · 改稿`, suggestions: [] }, accepted: [], choice: {}, chat: [] }
   const { review, accepted, choice } = cur
   const chat = cur.chat ?? []
-  const saved = cur.materials ?? []
   const idea = text.split('\n').filter((l) => l.trim() && !/^\s*[[【（(]/.test(l)).length < 4
   const matNotes = saved.length
-    ? '\n作者为这份草稿收藏的素材（可以直接引用、接着聊）：\n' + saved.slice(0, 20).map((m) => `- [${m.kind}] ${m.title}${m.source ? '（' + m.source + '）' : ''}：${m.text.slice(0, 600)}${m.use ? ' 用法：' + m.use : ''}`).join('\n')
+    ? '\n作者收藏的素材（可以直接引用、接着聊）：\n' + saved.slice(0, 20).map((m) => `- [${m.kind}] ${m.title}${m.source ? '（' + m.source + '）' : ''}：${m.text.slice(0, 600)}${m.use ? ' 用法：' + m.use : ''}`).join('\n')
     : ''
   const [matForm, setMatForm] = useState<Material | null>(null)
   const saveMat = () => {
     if (!matForm || !matForm.title.trim()) return
     const prev = saved.find((x) => x.id === matForm.id)
-    const m = { ...matForm, title: matForm.title.trim(), translation: prev && prev.text !== matForm.text ? undefined : matForm.translation }
-    setState({ ...cur, materials: saved.some((x) => x.id === m.id) ? saved.map((x) => (x.id === m.id ? m : x)) : [m, ...saved] })
+    const changed = !!prev && prev.text !== matForm.text
+    const m = { ...matForm, title: matForm.title.trim(), translation: changed ? undefined : matForm.translation, glosses: changed ? undefined : matForm.glosses }
+    setMaterials((all) => (all.some((x) => x.id === m.id) ? all.map((x) => (x.id === m.id ? m : x)) : [m, ...all]))
     setMatForm(null)
   }
   const [trans, setTrans] = useState<{ id: string; text: string } | null>(null)
@@ -134,11 +225,33 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
     }
     setTrans(null)
     if (!out) return
-    const now = latest.current
-    setState({ ...now, materials: (now.materials ?? []).map((x) => (x.id === m.id ? { ...x, translation: out } : x)) })
+    setMaterials((all) => all.map((x) => (x.id === m.id ? { ...x, translation: out } : x)))
   }
+  const [glossing, setGlossing] = useState<{ id: string; at: number; text: string } | null>(null)
+  const gloss = async (m: Material, src: string, at: number) => {
+    if (!sample || glossing || trans) return
+    setGlossing({ id: m.id, at, text: '' })
+    setChatError('')
+    let out = ''
+    try {
+      const res = await sample(glossPrompt(m, src), { cache: false, onText: ({ text: t }) => setGlossing({ id: m.id, at, text: t }) })
+      out = res.text.trim()
+    } catch (e) {
+      setChatError(errorText((e as { code?: string }).code))
+    }
+    setGlossing(null)
+    if (!out) return
+    setMaterials((all) => all.map((x) => (x.id === m.id ? { ...x, glosses: [...(x.glosses ?? []).filter((g) => g.at !== at), { src, zh: out, at }] } : x)))
+  }
+  const dropGloss = (m: Material, at: number) => setMaterials((all) => all.map((x) => (x.id === m.id ? { ...x, glosses: (x.glosses ?? []).filter((g) => g.at !== at) } : x)))
+  const rhyme = (m: Material, word: string, group: string | null) =>
+    setGroups((all) =>
+      group
+        ? all.map((g) => (g.id === group ? addItems(g, [word]) : g))
+        : [...all, { id: 'g' + Math.random().toString(36).slice(2, 10), items: [word], song: m.title, artist: m.source, color: all.length, from: m.id }],
+    )
   const toggleMat = (m: Material) =>
-    setState({ ...cur, materials: saved.some((x) => x.title === m.title) ? saved.filter((x) => x.title !== m.title) : [...saved, { ...m, id: 'm' + Math.random().toString(36).slice(2, 10) }] })
+    setMaterials((all) => (all.some((x) => x.title === m.title) ? all.filter((x) => x.title !== m.title) : [...all, { ...m, id: 'm' + Math.random().toString(36).slice(2, 10) }]))
 
   const [tab, setTab] = useState<'chat' | 'list' | 'mats'>('chat')
   const [error, setError] = useState('')
@@ -210,7 +323,8 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
     const { suggestions } = splitReply(answer, Date.now().toString(36))
     setState({
       ...now,
-      chat: [...(now.chat ?? turns), { role: 'assistant', content: answer }],
+      // 回答来得太快时，最新状态里可能还没有刚发出的那句，这时用本地的
+      chat: [...(now.chat && now.chat.length >= turns.length ? now.chat : turns), { role: 'assistant', content: answer }],
       review: { ...now.review, suggestions: [...now.review.suggestions, ...suggestions] },
     })
   }
@@ -224,11 +338,33 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
   }, [ask, sample])
 
   const applied = useMemo(() => applyReview(text, review, new Set(accepted), choice), [text, review, accepted, choice])
-  const rows = useMemo(() => diffLines(text, applied.text), [text, applied])
+  const manual = cur.manual
+  const final = manual ?? applied.text
+  const rows = useMemo(() => diffLines(text, final), [text, final])
   const usable = review.suggestions.filter((s) => applied.status[s.id] !== 'missing')
-  const changed = applied.text !== text
+  const changed = final !== text
+  const [editing, setEditing] = useState(false)
+  const [dropManual, setDropManual] = useState(false)
+  const [manualMsg, setManualMsg] = useState('')
 
-  const toggle = (id: string) => setState({ ...cur, accepted: accepted.includes(id) ? accepted.filter((x) => x !== id) : [...accepted, id] })
+  const toggle = (id: string) => {
+    const on = !accepted.includes(id)
+    const next = { ...cur, accepted: on ? [...accepted, id] : accepted.filter((x) => x !== id) }
+    if (manual === undefined) return setState(next)
+    // 已经手改过：新接受的建议直接写进手改稿，找不到原句就不动
+    const s = review.suggestions.find((x) => x.id === id)
+    if (on && s) {
+      const one = applyReview(manual, { ...review, suggestions: [s] }, new Set([id]), choice)
+      if (one.status[id] === 'ok') {
+        setManualMsg('这条建议已经写进你手改的稿子里。')
+        return setState({ ...next, manual: one.text })
+      }
+      setManualMsg('你手改的稿子里找不到这条建议要改的原句，没有动它。可以照着建议自己改。')
+      return
+    }
+    setManualMsg('取消接受不会把你手改的稿子改回去，需要的话自己改回来。')
+    setState(next)
+  }
   const remove = (id: string) =>
     setState({ ...cur, review: { ...review, suggestions: review.suggestions.filter((s) => s.id !== id) }, accepted: accepted.filter((x) => x !== id) })
   const jump = (find: string) => {
@@ -276,14 +412,31 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
           <div>原稿<small>不会被改动</small></div>
           <div>
             改后<small>已接受 {accepted.filter((id) => applied.status[id] === 'ok').length} / {usable.length} 条</small>
-            {text.trim() ? (
-              <button className="primary" disabled={!changed} onClick={() => onSaveAsNew(applied.text)}>存为新草稿</button>
+            {manual !== undefined && <span className="tag">手改过</span>}
+            <button onClick={() => { if (!editing && manual === undefined) setState({ ...cur, manual: applied.text }); setEditing(!editing); setManualMsg('') }}>{editing ? '看对比' : '自己改'}</button>
+            {manual !== undefined && (dropManual ? (
+              <>
+                <button className="link" onClick={() => { setState({ ...cur, manual: undefined }); setEditing(false); setDropManual(false); setManualMsg('') }}>确定放弃</button>
+                <button className="link" onClick={() => setDropManual(false)}>不放弃</button>
+              </>
             ) : (
-              <button className="primary" disabled={!changed} onClick={() => { onWrite(applied.text); setState({ ...cur, accepted: [] }) }}>写进这份草稿</button>
+              <button className="link" title="丢掉手改的内容，回到按建议生成的改后稿" onClick={() => setDropManual(true)}>放弃手改</button>
+            ))}
+            {text.trim() ? (
+              <button className="primary" disabled={!changed} onClick={() => onSaveAsNew(final)}>存为新草稿</button>
+            ) : (
+              <button className="primary" disabled={!changed} onClick={() => { onWrite(final); setState({ ...cur, accepted: [], manual: undefined }); setEditing(false) }}>写进这份草稿</button>
             )}
           </div>
         </div>
-        <div className="diff-body">
+        {manualMsg && <p className="muted diff-note">{manualMsg}</p>}
+        {editing && (
+          <div className="diff-edit">
+            <pre className="dcell old">{text.replace(/\*/g, '') || '（原稿是空的）'}</pre>
+            <textarea id="review-manual" className="dcell new" value={manual ?? ''} onChange={(e) => setState({ ...cur, manual: e.target.value })} placeholder="在这里直接改。原稿在左边，不会被动到。" spellCheck={false} />
+          </div>
+        )}
+        <div className="diff-body" hidden={editing}>
           {!text.trim() && !changed && <p className="muted diff-empty">这份草稿还是空的。可以先在右边和 Claude 聊主题，让它把提纲写进来；也可以去“写词”里直接写。</p>}
           {rows.map((r, i) => {
             const left = r.left?.replace(/\*/g, '') ?? null
@@ -392,7 +545,7 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
 
         {tab === 'mats' && (
           <div className="pane">
-            <p className="muted">这份草稿收藏的典故、诗词、意象和参考歌曲。内容是 Claude 凭记忆给的，用之前点“搜原文核对”确认一下。</p>
+            <p className="muted">收藏的典故、诗词、意象和参考歌曲，所有草稿和版本共用一份。Claude 凭记忆给的内容，用之前点“搜原文核对”确认一下。在卡片的原文里用鼠标划一下：划几行外文可以只翻译那几行；划一个词或短语可以记成韵脚，同一组韵会标上同一种颜色，写词页查韵时会排在最前面。</p>
             {matForm ? (
               <form className="mat-form" onSubmit={(e) => { e.preventDefault(); saveMat() }}>
                 <div className="row tight">
@@ -416,7 +569,7 @@ export function ReviewView({ title, text, state, setState, onSaveAsNew, onWrite,
             )}
             {saved.length === 0 && !matForm && <p className="muted">还没有收藏。可以和 Claude 聊主题让它给素材，也可以把自己查到的原文、歌词加进来。</p>}
             <div className="mats">
-              {saved.map((m) => <MaterialCard key={m.id} m={m} saved onToggle={() => toggleMat(m)} onEdit={() => setMatForm(m)} onTranslate={sample ? () => void translate(m) : undefined} live={trans?.id === m.id ? trans.text : null} />)}
+              {saved.map((m) => <MaterialCard key={m.id} m={m} saved onToggle={() => toggleMat(m)} onEdit={() => setMatForm(m)} onTranslate={sample ? () => void translate(m) : undefined} live={trans?.id === m.id ? trans.text : null} onGloss={sample ? (src, at) => void gloss(m, src, at) : undefined} onDropGloss={(at) => dropGloss(m, at)} glossing={glossing?.id === m.id ? glossing : null} groups={groups.filter((g) => g.from === m.id)} onRhyme={(w, g) => rhyme(m, w, g)} />)}
               {chatError && <p className="review-error">{chatError}</p>}
             </div>
           </div>

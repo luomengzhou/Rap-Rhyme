@@ -2,6 +2,12 @@
 import type { Suggestion } from './review'
 
 /** Claude 给的一条素材：典故、诗词、神话、意象等 */
+export interface Gloss {
+  src: string
+  zh: string
+  at: number
+}
+
 export interface Material {
   id: string
   /** 典故 / 诗词 / 神话 / 寓言 / 文学 / 意象 / 说法 / 歌曲 */
@@ -13,8 +19,10 @@ export interface Material {
   text: string
   /** 可以怎么用在这首词里 */
   use: string
-  /** 中文翻译，一行对一行 */
+  /** 整段的大意讲解（旧版本里是逐行翻译） */
   translation?: string
+  /** 划出来单独翻译的几句：src 是原文片段，at 是它最后一行在 text 里的行号 */
+  glosses?: Gloss[]
 }
 
 export interface Turn {
@@ -146,4 +154,29 @@ export function errorText(code: string | undefined): string {
 
 /** 让 Claude 把一段外语原文逐行译成中文 */
 export const translatePrompt = (m: Material) =>
-  `把下面这段${m.kind === '歌词' || m.kind === '歌曲' ? '歌词' : '文字'}翻译成中文，给一个正在学写词的人看懂原意用。\n要求：一行原文对应一行译文，行数和原文完全一致，空行照样保留；只输出译文，不要原文、标题和解释；语气自然，保留意象和口吻，不要为了押韵改意思；有双关或文化梗的地方，在那一行末尾用圆括号简短注明。已经是中文的行原样保留。\n\n出处：${m.title}${m.source ? ' / ' + m.source : ''}\n原文：\n<<<\n${m.text.slice(0, 12000)}\n>>>`
+  `下面是一段${m.kind === '歌词' || m.kind === '歌曲' ? '歌词' : '文字'}，给一个正在学写词的人讲讲它在说什么。\n要求：不要逐行翻译，按段落用自己的话概括大意，每段两三句；点出关键的意象、双关和文化梗；最后用一两句说这首的情绪是怎么推进的。每段开头单独一行写段落名（比如 Verse 1、副歌）。只用纯文字，不要用 Markdown 符号（不要星号、井号）。\n\n出处：${m.title}${m.source ? ' / ' + m.source : ''}\n原文：\n<<<\n${m.text.slice(0, 12000)}\n>>>`
+
+/** 一次最多划几行来翻译 */
+export const GLOSS_MAX_LINES = 8
+
+export const glossPrompt = (m: Material, src: string) =>
+  `把下面这几句${m.kind === '歌词' || m.kind === '歌曲' ? '歌词' : '文字'}翻译成中文，给一个正在学写词的人看懂原意用。\n要求：一行原文对应一行译文；只输出译文，不要原文、标题和解释；语气自然，保留意象和口吻，不要为了押韵改意思；有双关或文化梗的地方，在那一行末尾用圆括号简短注明。只用纯文字，不要用 Markdown 符号。\n\n出处：${m.title}${m.source ? ' / ' + m.source : ''}\n要翻译的几句：\n<<<\n${src}\n>>>`
+
+/** 划选的文字落在原文的哪几行；找不到返回 null。返回整理好的片段和最后一行的行号 */
+export function locateGloss(text: string, selected: string): { src: string; at: number } | null {
+  const lines = text.split('\n')
+  const want = selected.split('\n').map((l) => l.trim()).filter(Boolean)
+  if (!want.length) return null
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].includes(want[0])) continue
+    let j = i
+    let ok = true
+    for (let k = 1; k < want.length && ok; k++) {
+      j++
+      while (j < lines.length && !lines[j].trim()) j++
+      ok = j < lines.length && lines[j].includes(want[k])
+    }
+    if (ok) return { src: want.join('\n'), at: j }
+  }
+  return null
+}
