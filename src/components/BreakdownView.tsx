@@ -13,12 +13,14 @@ interface Props {
   onPlayGenre: (id: string) => void
   /** 把拆出来的段落套到写词页的结构里 */
   onUse: (tpl: SectionTpl[], bpm: number) => void
+  /** 按这首歌的速度去敲字的落点 */
+  onTap: (bpm: number) => void
 }
 
 const fresh = (): Breakdown => ({ id: 'b' + Math.random().toString(36).slice(2, 10), song: '', artist: '', bpm: 0, parts: [] })
 
 /** 拆歌：一边放歌一边打点，记下 beat 每次变化的位置，再用大白话描述每一段 */
-export function BreakdownView({ list, setList, draftTitle, onAsk, onPlayGenre, onUse }: Props) {
+export function BreakdownView({ list, setList, draftTitle, onAsk, onPlayGenre, onUse, onTap }: Props) {
   const [curId, setCurId] = useState(list[0]?.id ?? '')
   const cur = list.find((b) => b.id === curId) ?? list[0]
   const patch = (f: (b: Breakdown) => Breakdown) => cur && setList(list.map((b) => (b.id === cur.id ? f(b) : b)))
@@ -98,6 +100,13 @@ export function BreakdownView({ list, setList, draftTitle, onAsk, onPlayGenre, o
         <input id="bd-bpm" type="number" min={40} max={220} value={cur.bpm || ''} onChange={(e) => patch((b) => ({ ...b, bpm: Number(e.target.value) || 0 }))} placeholder="BPM" />
         <span className="muted">{tapMsg || (cur.bpm ? `约 ${cur.bpm} BPM。像点头那样一拍点一下，点 8 下左右就稳了。知道速度才能算出每段几小节。` : '放着歌，像点头那样一拍点一下。')}</span>
       </div>
+      <div className="row bd-bpm-help">
+        <span className="muted">不想自己点：</span>
+        <a className="btn" href={'https://www.google.com/search?q=' + encodeURIComponent(`${cur.song} ${cur.artist} BPM`)} target="_blank" rel="noreferrer" aria-disabled={!cur.song.trim()}>上网搜这首歌的 BPM</a>
+        <button disabled={!cur.song.trim()} onClick={() => onAsk(`《${cur.song}》${cur.artist ? '（' + cur.artist + '）' : ''}这首歌的 BPM 大概是多少？你是凭记忆说的：有把握就给一个数，并说明是按原速还是半速数的（比如 trap 常说 140，也可以数成 70）；没把握就直说不确定，告诉我去哪里查、或者怎么自己点出来，不要编一个数。`)}>问 Claude</button>
+        <button disabled={!cur.bpm} onClick={() => onTap(cur.bpm)} title="换成节拍器和这首歌的速度，去“记灵感 · 敲节奏”里，跟着歌把一句词的每个字敲出来">按这个速度去敲字落在哪</button>
+      </div>
+      <p className="muted">搜到的数和你点出来的差一倍很正常，那是按半速数的，两个都对。敲字的落点时，在别的 app 里放着歌，跟着唱到的每个字按空格。</p>
 
       <h3>第二步：边听边打点</h3>
       <div className="row">

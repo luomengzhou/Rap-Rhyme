@@ -23,7 +23,7 @@ import type { Material } from './lib/ai'
 import type { RhymeGroup } from './lib/book'
 import { TheoryView } from './components/TheoryView'
 
-type View = 'write' | 'book' | 'flow' | 'hum' | 'refs' | 'breakdown' | 'genres' | 'theory'
+type View = 'write' | 'book' | 'idea' | 'study' | 'genres' | 'theory'
 
 /** 把以前跟着各份草稿存的素材收到一起，同一条只留一份 */
 function gatherMaterials(reviews: Record<string, ReviewState>): Material[] {
@@ -66,6 +66,9 @@ export default function App() {
   const [confirmDel, setConfirmDel] = useState(false)
   const [ask, setAsk] = useState('')
   const [bookFocus, setBookFocus] = useState('')
+  // 记灵感（自己的想法）：敲节奏、哼一段；学歌（别人的歌）：听歌笔记、拆歌
+  const [ideaTab, setIdeaTab] = useStored<'tap' | 'hum'>('rr.ideaTab', 'tap')
+  const [studyTab, setStudyTab] = useStored<'notes' | 'breakdown'>('rr.studyTab', 'notes')
   const [sel, setSel] = useState({ start: 0, end: 0, text: '' })
   const input = useRef<HTMLTextAreaElement>(null)
 
@@ -186,9 +189,9 @@ export default function App() {
   }
 
   const written = analysis.sections.reduce((a, x) => a + x.bars, 0)
-  const mine = refs.filter((r) => r.draft === (draft.title || '未命名')).slice(0, 12)
+  const mine = refs.filter((r) => r.draft === (draft.title || '未命名') || (!r.draft && !r.folder)).slice(0, 16)
   const refNotes = mine.length
-    ? '\n作者为这份草稿记的听歌笔记（参考手法用）：\n' + mine.map((r) => `- ${r.song}${r.artist ? ' / ' + r.artist : ''}${r.at ? '，位置 ' + r.at : ''}${r.fit ? '，适合 ' + r.fit : ''}${r.note ? '，' + r.note : ''}`).join('\n')
+    ? '\n作者记的听歌笔记（这首歌的和全局的，参考手法用）：\n' + mine.map((r) => `- ${r.song}${r.artist ? ' / ' + r.artist : ''}${r.at ? '，位置 ' + r.at : ''}${r.fit ? '，适合 ' + r.fit : ''}${r.note ? '，' + r.note : ''}`).join('\n')
     : ''
   const askClaude = (q: string) => {
     setAsk(q)
@@ -209,14 +212,12 @@ export default function App() {
         <nav>
           <button className={view === 'write' ? 'on' : ''} onClick={() => setView('write')}>写词</button>
           <button className={view === 'book' ? 'on' : ''} onClick={() => setView('book')}>韵脚本</button>
-          <button className={view === 'flow' ? 'on' : ''} onClick={() => setView('flow')}>打拍</button>
-          <button className={view === 'hum' ? 'on' : ''} onClick={() => setView('hum')}>哼唱</button>
-          <button className={view === 'refs' ? 'on' : ''} onClick={() => setView('refs')}>听歌笔记</button>
-          <button className={view === 'breakdown' ? 'on' : ''} onClick={() => setView('breakdown')}>拆歌</button>
+          <button className={view === 'idea' ? 'on' : ''} onClick={() => setView('idea')} title="自己脑子里的节奏和旋律：敲出来、哼出来">记灵感</button>
+          <button className={view === 'study' ? 'on' : ''} onClick={() => setView('study')} title="别人的歌：听歌笔记、拆歌">学歌</button>
           <button className={view === 'genres' ? 'on' : ''} onClick={() => setView('genres')}>曲风</button>
           <button className={view === 'theory' ? 'on' : ''} onClick={() => setView('theory')}>乐理卡</button>
         </nav>
-        {(view === 'write' || view === 'refs') && (
+        {(view === 'write' || view === 'study') && (
           <div className="drafts">
             <select value={draft.id} onChange={(e) => { setActiveId(e.target.value); setConfirmDel(false) }}>
               {drafts.map((d) => (
@@ -321,34 +322,44 @@ export default function App() {
           <BookView groups={groups} setGroups={setGroups} materials={materials} refs={refs} setRefs={setRefs} mode={mode} isWord={index ? (w) => index.set.has(w) : undefined} focus={bookFocus} onLookup={lookup} onAsk={askClaude} />
         </main>
       )}
-      {view === 'flow' && (
+      {view === 'idea' && (
         <main className="single">
-          <FlowView bpm={bpm} playing={playing} start={start} currentLine={currentLine} />
+          <div className="subtabs">
+            <button className={ideaTab === 'tap' ? 'on' : ''} onClick={() => setIdeaTab('tap')}>敲节奏</button>
+            <button className={ideaTab === 'hum' ? 'on' : ''} onClick={() => setIdeaTab('hum')}>哼一段</button>
+            <span className="muted">脑子里有拍子就敲出来，有旋律就哼出来，都能存下来再配词。</span>
+          </div>
+          {ideaTab === 'tap' ? <FlowView bpm={bpm} playing={playing} start={start} currentLine={currentLine} /> : <HumView onAsk={askClaude} />}
         </main>
       )}
-      {view === 'hum' && (
+      {view === 'study' && (
         <main className="single">
-          <HumView onAsk={askClaude} />
-        </main>
-      )}
-      {view === 'refs' && (
-        <main className="single">
-          <RefsView groups={groups} onBook={(song) => { setBookFocus(song); setView('book') }} refs={refs} setRefs={setRefs} draftTitle={draft.title} sections={analysis.sections.map((x) => x.name).filter((n) => n !== '未命名段落')} />
-        </main>
-      )}
-      {view === 'breakdown' && (
-        <main className="single">
-          <BreakdownView
-            list={breakdowns}
-            setList={setBreakdowns}
-            draftTitle={draft.title}
-            onAsk={askClaude}
-            onPlayGenre={(id) => void playGenre(id)}
-            onUse={(tpl, b) => {
-              setTemplate(tpl)
-              if (b >= 60 && b <= 180) setBpm(b)
-            }}
-          />
+          <div className="subtabs">
+            <button className={studyTab === 'notes' ? 'on' : ''} onClick={() => setStudyTab('notes')}>听歌笔记</button>
+            <button className={studyTab === 'breakdown' ? 'on' : ''} onClick={() => setStudyTab('breakdown')}>拆歌</button>
+            <span className="muted">听歌笔记记“这首歌哪里值得学”，拆歌把一首歌从头到尾分段记清楚。</span>
+          </div>
+          {studyTab === 'notes' ? (
+            <RefsView groups={groups} onBook={(song) => { setBookFocus(song); setView('book') }} refs={refs} setRefs={setRefs} draftTitle={draft.title} sections={analysis.sections.map((x) => x.name).filter((n) => n !== '未命名段落')} onPlayGenre={(id) => void playGenre(id)} />
+          ) : (
+            <BreakdownView
+              list={breakdowns}
+              setList={setBreakdowns}
+              draftTitle={draft.title}
+              onAsk={askClaude}
+              onPlayGenre={(id) => void playGenre(id)}
+              onUse={(tpl, b) => {
+                setTemplate(tpl)
+                if (b >= 60 && b <= 180) setBpm(b)
+              }}
+              onTap={(b) => {
+                if (b >= 60 && b <= 180) setBpm(b)
+                setBeatId('click')
+                setIdeaTab('tap')
+                setView('idea')
+              }}
+            />
+          )}
         </main>
       )}
       {view === 'genres' && (
