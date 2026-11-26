@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import type { Analysis } from '../lib/analyze'
+import { NOTE, type Analysis } from '../lib/analyze'
 import { colorOf } from '../lib/palette'
 
 interface Props {
@@ -46,7 +46,7 @@ export function Editor({ text, analysis, maxPerLine, onChange, onSelect, inputRe
             {analysis.lines.map((l, i) => (
               <div key={i} className={l.header ? 'line header' : 'line'}>
                 {l.text === '' ? '​' : segments(l.text, l.marks).map((s, k) =>
-                  s.g < 0 ? <span key={k}>{s.t}</span> : <span key={k} className="rh" style={{ color: colorOf(s.g), borderBottomColor: colorOf(s.g) }}>{s.t}</span>,
+                  s.g === NOTE ? <span key={k} className="note">{s.t}</span> : s.g < 0 ? <span key={k}>{s.t}</span> : <span key={k} className="rh" style={{ color: colorOf(s.g), borderBottomColor: colorOf(s.g) }}>{s.t}</span>,
                 )}
               </div>
             ))}
@@ -57,7 +57,7 @@ export function Editor({ text, analysis, maxPerLine, onChange, onSelect, inputRe
             value={text}
             spellCheck={false}
             rows={Math.max(analysis.lines.length, 12)}
-            placeholder={'在这里写词，一行算一小节。\n用 [主歌1]、[副歌] 这样的标题分段。\n也可以把别人的歌词贴进来做韵脚检查。'}
+            placeholder={'在这里写词，一行算一小节。\n用 [主歌1]、[副歌] 这样的标题分段。\n用（圆括号）写这一段想表达什么，它不算歌词。\n也可以把别人的歌词贴进来做韵脚检查。'}
             onChange={(e) => onChange(e.target.value)}
             onSelect={report}
             onKeyUp={report}

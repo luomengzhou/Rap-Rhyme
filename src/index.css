@@ -64,6 +64,7 @@ main.single { overflow: auto; padding: 24px 32px 40px; }
 .backdrop { position: absolute; inset: 0; pointer-events: none; color: var(--ink); }
 .backdrop .line { height: var(--lh); }
 .backdrop .line.header { color: var(--dim); font-size: 14px; letter-spacing: .1em; }
+.backdrop .note { color: #8f86b8; background: #8f86b81f; border-radius: 3px; }
 .backdrop .rh { font-weight: 700; border-bottom: 2px solid; padding-bottom: 1px; }
 .input { position: relative; display: block; background: transparent; color: transparent; caret-color: #fff; resize: none; outline: none !important; border-radius: 0; min-height: 100%; }
 .input::placeholder { color: var(--dim); }
@@ -194,15 +195,15 @@ main.review { display: grid; grid-template-columns: minmax(0, 1fr) 420px; }
 .review-note { color: #c9ccd6; }
 .primary { background: var(--accent); color: #06202e; border-color: var(--accent); font-weight: 600; }
 .row.tight { margin: 0; }
-.diff { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.diff-head { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); background: var(--panel); }
+.diff { display: flex; flex-direction: column; min-height: 0; min-width: 0; flex: 1; position: relative; }
+.diff-head { display: grid; grid-template-columns: var(--dl, 1fr) var(--dr, 1fr); border-bottom: 1px solid var(--line); background: var(--panel); }
 .diff-head > div { padding: 9px 16px; display: flex; align-items: center; gap: 10px; font-weight: 600; }
 .diff-head > div + div { border-left: 1px solid var(--line); }
 .diff-head small { color: var(--dim); font-weight: 400; }
 .diff-head small { margin-right: auto; }
 .diff-head > div { flex-wrap: wrap; }
 .diff-body { overflow: auto; flex: 1; padding: 10px 0 60px; }
-.diff-row { display: grid; grid-template-columns: 1fr 1fr; font-size: 16px; line-height: 30px; }
+.diff-row { display: grid; grid-template-columns: var(--dl, 1fr) var(--dr, 1fr); font-size: 16px; line-height: 30px; }
 .diff-row .dcell { padding: 0 16px 0 20px; min-height: 30px; white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid transparent; }
 .diff-row .dcell.new { border-left-color: var(--line); }
 .diff-row.header .dcell { color: var(--dim); font-size: 13px; letter-spacing: .1em; }
@@ -303,7 +304,7 @@ mark.rh { background: none; border-bottom: 2px solid; border-radius: 0; padding:
 .rh-say input { flex: 1; min-width: 120px; }
 .rh-say .row { flex-wrap: wrap; gap: 6px; }
 .diff-note { margin: 0; padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
-.diff-edit { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }
+.diff-edit { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--dl, 1fr) var(--dr, 1fr); }
 .diff-edit .dcell { margin: 0; padding: 10px 16px 60px 20px; font: inherit; font-size: 16px; line-height: 30px; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; }
 .diff-edit pre.old { color: var(--dim); }
 .diff-edit textarea.new { border: none; border-left: 3px solid var(--accent); background: var(--panel); color: var(--ink); resize: none; outline: none; }
@@ -336,3 +337,82 @@ mark.rh { background: none; border-bottom: 2px solid; border-radius: 0; padding:
 .genre-grid .row { gap: 12px; }
 .genres section h3 { margin-top: 22px; }
 .hum-roll { height: 140px; }
+
+/* 写词和改稿合在一起的工作台 */
+main.work { display: grid; min-height: 0; }
+.work-left { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.work-left > .left { flex: 1; }
+.work-mode { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.work-mode button { background: none; border-color: transparent; color: var(--dim); padding: 4px 12px; }
+.work-mode button.on { background: var(--panel-2); color: var(--ink); border-color: var(--line); }
+.work-mode .tag { margin-left: 6px; font-style: normal; }
+.work-mode .muted { margin-left: 8px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.work-tabs button { font-size: 13px; padding: 11px 2px; white-space: nowrap; }
+main.work > aside { border-left: none; min-width: 0; }
+.splitter { background: var(--line); cursor: col-resize; touch-action: none; position: relative; }
+.splitter::after { content: ''; position: absolute; inset: 0 -4px; }
+.splitter:hover, .splitter:active { background: var(--accent); }
+.diff-split { position: absolute; top: 0; bottom: 0; width: 5px; margin-left: -2px; z-index: 2; background: transparent; left: calc(100% * var(--dl-n, .5)); }
+.app { grid-template-columns: minmax(0, 1fr); }
+header { flex-wrap: wrap; row-gap: 8px; }
+header .drafts { margin-left: auto; }
+.beatbar { min-width: 0; }
+.beatbar .desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 版本和备份 */
+.work-tools { margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.work-tools small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.work-mode .work-tools button { background: var(--panel-2); border-color: var(--line); color: var(--ink); }
+.work-mode .work-tools button.primary { background: var(--accent); color: #06202e; border-color: transparent; }
+.work-mode .work-tools button:disabled { opacity: .45; }
+.hist { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px minmax(0, 1fr); }
+.hist-list { overflow: auto; padding: 4px 14px 30px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.hist-item { text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; }
+.hist-item.on { border-color: var(--accent); }
+.hist-item small { color: var(--dim); }
+.hist-view { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.hist-bar { display: flex; align-items: center; gap: 10px; padding: 9px 16px; border-bottom: 1px solid var(--line); }
+.hist-bar .primary { margin-left: auto; }
+.hist-text { flex: 1; overflow: auto; margin: 0; padding: 14px 20px 60px; font: inherit; font-size: 16px; line-height: 30px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hist-empty { padding: 20px; }
+
+.beat-melody { display: flex; align-items: center; gap: 4px; color: var(--dim); font-size: 12px; white-space: nowrap; }
+
+/* 韵脚本页 */
+.book { max-width: 900px; }
+.book-find { border: 1px solid var(--line); border-radius: 10px; padding: 4px 16px 16px; background: var(--panel); display: flex; flex-direction: column; gap: 10px; }
+.book-find textarea { width: 100%; line-height: 1.7; }
+.book-find input { flex: 1; min-width: 0; }
+.book-cands { display: flex; flex-direction: column; gap: 6px; }
+.book-cand { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; opacity: .55; }
+.book-cand.on { opacity: 1; border-color: var(--accent); }
+.book-cand label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.book-cand .chips { flex: 1; margin: 0; }
+.book-cand .chip .w { padding: 2px 4px 2px 8px; }
+.book h3 input { font-size: 13px; font-weight: 400; width: 220px; }
+.book-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 0 14px; }
+
+/* 结构：和规整的歌比 */
+.st-shape { font-size: 13px; color: #c9ccd6; line-height: 1.7; margin: 6px 0; }
+.st-table td small { color: var(--dim); }
+.st-table .note { white-space: normal; line-height: 1.5; }
+.st-table tr.st-short td:nth-child(2), .st-table tr.st-long td:nth-child(2) { color: var(--warn); }
+.st-table .note { color: var(--dim); text-align: left; }
+.st-table tr.st-short .note, .st-table tr.st-long .note { color: var(--warn); }
+
+/* 听歌笔记：范围、曲风、星图 */
+.ref-scope input { flex: 1; min-width: 140px; }
+.ref-scope .primary { margin-left: auto; }
+.ref-filter { justify-content: space-between; flex-wrap: wrap; }
+.ref-map { border: 1px solid var(--line); border-radius: 10px; background: #0b0c12; margin: 10px 0 14px; padding: 6px 10px 2px; }
+.ref-map svg { display: block; width: 100%; max-height: 520px; }
+.ref-star { cursor: pointer; }
+.ref-star text { pointer-events: none; }
+.ref-star.on .dot { stroke: #fff; stroke-width: .5; }
+.ref-list li.on { border-color: var(--accent); }
+button.ref-genre { cursor: pointer; }
+/* 页面里的小标签页：记灵感、学歌 */
+.subtabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--line); }
+.subtabs button { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 16px; color: var(--dim); }
+.subtabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
+.subtabs .muted { margin-left: auto; align-self: center; font-size: 12px; }
