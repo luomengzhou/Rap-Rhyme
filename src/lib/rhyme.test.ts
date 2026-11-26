@@ -56,6 +56,20 @@ describe('找韵', () => {
     expect(words('不知道', 3)).toContain('出师表')
     expect(words('时代广场', 4, 'loose')).toContain('熙来攘往')
   })
+  it('宽押：前后鼻音算近韵，但 in 和 eng 不混', () => {
+    const loose = findRhymes(index, '中心', { n: 2, mode: 'loose' })
+    const hit = (w: string) => loose.find((h) => h.word.w === w)
+    // 我享受被当做中心 / 我习惯成为眼中钉 / …蓝莓味的尼古丁
+    expect(hit('眼中钉')).toMatchObject({ looseOnly: true })
+    expect(hit('眼中钉')!.near).toBeFalsy()
+    // 古 和 中 只对上元音，丁 和 心 是前后鼻音：算近押，排在最后
+    expect(hit('尼古丁')).toMatchObject({ near: true })
+    expect(loose.findIndex((h) => h.near)).toBeGreaterThan(loose.findIndex((h) => h.word.w === '眼中钉'))
+    // 心 和 风 听起来不是一个韵
+    expect(hit('东风')).toBeUndefined()
+    expect(words('中心', 2)).not.toContain('眼中钉')
+    expect(words('中心', 1, 'loose')).not.toContain('风')
+  })
   it('默认不给生僻词，屏蔽的词不再出现', () => {
     expect(findRhymes(index, '不错', { n: 2, mode: 'strict' }).every((h) => h.word.tier < 2)).toBe(true)
     const r = findRhymes(index, '不错', { n: 2, mode: 'strict', blocked: new Set(['渡过']) })

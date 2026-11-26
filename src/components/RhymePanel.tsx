@@ -72,6 +72,7 @@ interface Shown {
   /** 读音，鼠标停上去能看到 */
   title: string
   looseOnly: boolean
+  near?: boolean
   rare: boolean
   /** 中文意思（英文词才有） */
   zh?: string
@@ -154,7 +155,7 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
     if (!index || !syls.length) return { hits: [], counts: [0, 0, 0, 0] }
     const base = { mode, sameTone, showRare, length, blocked: blockedSet }
     const counts = [1, 2, 3, 4].map((k) => (k <= maxN ? findRhymes(index, query, { ...base, n: k }).length : 0))
-    const hits = findRhymes(index, query, { ...base, n: useN }).map(({ word, looseOnly }) => ({ w: word.w, title: word.syls.map((x) => x.py.replace('v', 'ü') + (x.tone || '')).join(' '), looseOnly, rare: word.tier === 2 }))
+    const hits = findRhymes(index, query, { ...base, n: useN }).map(({ word, looseOnly, near }) => ({ w: word.w, near, title: word.syls.map((x) => x.py.replace('v', 'ü') + (x.tone || '')).join(' '), looseOnly, rare: word.tier === 2 }))
     return { hits: hits.sort(byLiked), counts }
   }, [en, enIdx, size, index, query, syls.length, mode, sameTone, showRare, length, blockedSet, likedSet, useN, maxN, extra])
 
@@ -188,7 +189,7 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
       <div className="row opts">
         <div className="seg small">
           <button className={mode === 'strict' ? 'on' : ''} onClick={() => setMode('strict')} title={en ? '元音和它后面的辅音都一样才算' : '按实际听感：主要元音和韵尾都相同才算'}>严格</button>
-          <button className={mode === 'loose' ? 'on' : ''} onClick={() => setMode('loose')} title={en ? '只要元音一样就算，辅音不管。说唱里最常用，结果里会标出来' : '再合并 en/eng、in/ing、e/o 等相近的韵，结果里会标出来'}>含宽押</button>
+          <button className={mode === 'loose' ? 'on' : ''} onClick={() => setMode('loose')} title={en ? '只要元音一样就算，辅音不管。说唱里最常用，结果里会标出来' : '再算上前后鼻音（in/ing、en/eng）和 e/o、i/ü 这些相近的韵，标“宽”；多押时还会列出只有最后一个字押实、前面只对元音的词，标“近”'}>含宽押</button>
         </div>
         {!en && <label><input type="checkbox" checked={sameTone} onChange={(e) => setSameTone(e.target.checked)} />末字同声调</label>}
         <label><input type="checkbox" checked={showRare} onChange={(e) => setShowRare(e.target.checked)} />生僻词</label>
@@ -231,7 +232,7 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
       {en && said && size > 0 && (
         <p className="muted key">
           押的音：<code>{enKey(said.ph, useN, mode)}</code>
-          {mode === 'strict' ? '严格押的词少，说唱里多半只押元音，可以点“含宽押”。' : '带“宽”字的只押元音。'}
+          {mode === 'strict' ? '严格押的词少，说唱里多半只押元音，可以点“含宽押”。' : '带“宽”字的是相近的韵（比如前后鼻音）；带“近”字的只有最后一个字押得实，前面只对元音。'}
         </p>
       )}
       {en && said && size > 0 && hits.length === 0 && <p className="muted">常用词里没有能{N_LABEL[useN]}上的。{mode === 'strict' ? '试试“含宽押”，' : ''}或者减少押的音节数。三押以上多半要靠几个词拼成短语。</p>}
@@ -246,11 +247,11 @@ export function RhymePanel({ index, query, setQuery, mode, setMode, blocked, set
         </p>
       )}
       <div className="chips">
-        {shown.map(({ w, title, looseOnly, rare, zh }) => (
+        {shown.map(({ w, title, looseOnly, near, rare, zh }) => (
           <span key={w} className={'chip' + (looseOnly ? ' loose' : '') + (likedSet.has(w) ? ' liked' : '') + (rare ? ' rare' : '')}>
             <button className="w" title={(zh ? zh + ' · ' : '') + title + (onPick ? ' · 点击插入草稿' : '')} onClick={() => onPick?.(w)}>
               {w}
-              {looseOnly && <i>宽</i>}
+              {looseOnly && <i title={near ? '只有最后一个字押得实，前面的字只对上了元音' : '相近的韵，不是完全一样'}>{near ? '近' : '宽'}</i>}
               {en && showZh && zh && <small>{zh}</small>}
             </button>
             <button className="act" title="喜欢，排到前面" onClick={() => setLiked(likedSet.has(w) ? liked.filter((x) => x !== w) : [...liked, w])}>♥</button>
