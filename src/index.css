@@ -399,3 +399,20 @@ header .drafts { margin-left: auto; }
 .st-table tr.st-short td:nth-child(2), .st-table tr.st-long td:nth-child(2) { color: var(--warn); }
 .st-table .note { color: var(--dim); text-align: left; }
 .st-table tr.st-short .note, .st-table tr.st-long .note { color: var(--warn); }
+
+/* 听歌笔记：范围、曲风、星图 */
+.ref-scope input { flex: 1; min-width: 140px; }
+.ref-scope .primary { margin-left: auto; }
+.ref-filter { justify-content: space-between; flex-wrap: wrap; }
+.ref-map { border: 1px solid var(--line); border-radius: 10px; background: #0b0c12; margin: 10px 0 14px; padding: 6px 10px 2px; }
+.ref-map svg { display: block; width: 100%; max-height: 520px; }
+.ref-star { cursor: pointer; }
+.ref-star text { pointer-events: none; }
+.ref-star.on .dot { stroke: #fff; stroke-width: .5; }
+.ref-list li.on { border-color: var(--accent); }
+button.ref-genre { cursor: pointer; }
+/* 页面里的小标签页：记灵感、学歌 */
+.subtabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--line); }
+.subtabs button { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 16px; color: var(--dim); }
+.subtabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
+.subtabs .muted { margin-left: auto; align-self: center; font-size: 12px; }
