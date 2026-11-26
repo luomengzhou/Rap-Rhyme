@@ -1,6 +1,10 @@
-// 用 Tone.js 在浏览器里合成示例 loop，不使用任何现成的歌或采样。
+// 示例 loop：鼓用公共领域（CC0）的真实鼓声采样，按曲风分成几套；低音和旋律由 Tone.js 合成。不使用任何现成的歌。
 import * as Tone from 'tone'
 import { GENRES } from './genres'
+
+/** 鼓声套件：原声鼓、柔和、808、drill、俱乐部、电子 */
+export type Kit = 'acoustic' | 'soft' | '808' | 'drill' | 'club' | 'electro'
+export const KIT_NAMES: Record<Kit, string> = { acoustic: '原声鼓', soft: '柔和的鼓', '808': '808 鼓机', drill: '低沉的 drill 鼓', club: '俱乐部鼓', electro: '老式电子鼓' }
 
 export interface Beat {
   id: string
@@ -16,6 +20,10 @@ export interface Beat {
   bass: Record<number, string>
   lead: Record<number, string>
   swing?: number
+  /** 用哪套鼓声 */
+  kit?: Kit
+  /** 军鼓的位置换成响指 */
+  snap?: boolean
 }
 
 /** 底部播放条能选的 beat：一个节拍器，加上曲风表里每种曲风的鼓点骨架 */
@@ -43,12 +51,37 @@ class Engine {
   private click!: Tone.Synth
   private seq: Tone.Sequence<number> | null = null
   private listeners = new Set<StepFn>()
+  private kits = new Map<Kit, Tone.Players | null>()
+  private out!: Tone.Limiter
+  /** 要不要放合成的旋律 */
+  melody = true
+
+  /** 载入一套鼓声采样。载不到（比如断网）就返回 null，退回合成的鼓 */
+  private loadKit(kit: Kit): Promise<Tone.Players | null> {
+    if (this.kits.has(kit)) return Promise.resolve(this.kits.get(kit)!)
+    const base = import.meta.env.BASE_URL + 'drums/'
+    const urls: Record<string, string> = { kick: `${kit}-kick.wav`, snare: `${kit}-snare.wav`, hat: `${kit}-hat.wav` }
+    if (kit === '808') urls.snap = '808-snap.wav'
+    return new Promise((resolve) => {
+      let done = false
+      const finish = (p: Tone.Players | null) => {
+        if (done) return
+        done = true
+        this.kits.set(kit, p)
+        resolve(p)
+      }
+      const players = new Tone.Players({ urls, baseUrl: base, onload: () => finish(players), onerror: () => finish(null) }).connect(this.out)
+      players.volume.value = -3
+      setTimeout(() => finish(null), 6000)
+    })
+  }
   playing = false
   beat: Beat = BEATS[0]
 
   private init() {
     if (this.ready) return
     const out = new Tone.Limiter(-3).toDestination()
+    this.out = out
     this.kick = new Tone.MembraneSynth({ octaves: 6, pitchDecay: 0.04, envelope: { attack: 0.001, decay: 0.3, sustain: 0 } }).connect(out)
     this.snare = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.16, sustain: 0 } }).connect(new Tone.Filter(1800, 'highpass').connect(out))
     this.snare.volume.value = -8
@@ -83,6 +116,12 @@ class Engine {
     this.init()
     this.stop()
     this.beat = beat
+    const kit = beat.id === 'click' ? null : await this.loadKit(beat.kit ?? 'acoustic')
+    const hit = (name: string, time: number, vel = 1) => {
+      const p = kit!.player(name)
+      p.volume.value = Tone.gainToDb(vel)
+      p.start(time)
+    }
     const t = Tone.getTransport()
     t.bpm.value = bpm
     t.swing = beat.swing ?? 0
@@ -93,11 +132,18 @@ class Engine {
         if (beat.id === 'click') {
           if (i % 4 === 0) this.click.triggerAttackRelease(i % 16 === 0 ? 'C6' : 'C5', '32n', time)
         } else {
-          if (beat.kick[i] === 'x') this.kick.triggerAttackRelease('C1', '8n', time)
-          if (beat.snare[i] === 'x') this.snare.triggerAttackRelease('16n', time)
-          if (beat.hat[i] === 'x') this.hat.triggerAttackRelease('32n', time)
+          if (kit) {
+            if (beat.kick[i] === 'x') hit('kick', time)
+            if (beat.snare[i] === 'x') hit(beat.snap && kit.has('snap') ? 'snap' : 'snare', time)
+            // 踩镲在正拍上重一点，其余轻一点，听起来不那么机械
+            if (beat.hat[i] === 'x') hit('hat', time, i % 4 === 0 ? 0.7 : i % 2 === 0 ? 0.5 : 0.35)
+          } else {
+            if (beat.kick[i] === 'x') this.kick.triggerAttackRelease('C1', '8n', time)
+            if (beat.snare[i] === 'x') this.snare.triggerAttackRelease('16n', time)
+            if (beat.hat[i] === 'x') this.hat.triggerAttackRelease('32n', time)
+          }
           if (beat.bass[i]) this.bass.triggerAttackRelease(beat.bass[i], '4n', time)
-          if (beat.lead[i]) this.lead.triggerAttackRelease(beat.lead[i], '8n', time)
+          if (this.melody && beat.lead[i]) this.lead.triggerAttackRelease(beat.lead[i], '8n', time)
         }
         Tone.getDraw().schedule(() => this.listeners.forEach((fn) => fn(i)), time)
       },

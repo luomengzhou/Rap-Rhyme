@@ -358,3 +358,61 @@ header { flex-wrap: wrap; row-gap: 8px; }
 header .drafts { margin-left: auto; }
 .beatbar { min-width: 0; }
 .beatbar .desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 版本和备份 */
+.work-tools { margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.work-tools small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.work-mode .work-tools button { background: var(--panel-2); border-color: var(--line); color: var(--ink); }
+.work-mode .work-tools button.primary { background: var(--accent); color: #06202e; border-color: transparent; }
+.work-mode .work-tools button:disabled { opacity: .45; }
+.hist { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px minmax(0, 1fr); }
+.hist-list { overflow: auto; padding: 4px 14px 30px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.hist-item { text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; }
+.hist-item.on { border-color: var(--accent); }
+.hist-item small { color: var(--dim); }
+.hist-view { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.hist-bar { display: flex; align-items: center; gap: 10px; padding: 9px 16px; border-bottom: 1px solid var(--line); }
+.hist-bar .primary { margin-left: auto; }
+.hist-text { flex: 1; overflow: auto; margin: 0; padding: 14px 20px 60px; font: inherit; font-size: 16px; line-height: 30px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hist-empty { padding: 20px; }
+
+.beat-melody { display: flex; align-items: center; gap: 4px; color: var(--dim); font-size: 12px; white-space: nowrap; }
+
+/* 韵脚本页 */
+.book { max-width: 900px; }
+.book-find { border: 1px solid var(--line); border-radius: 10px; padding: 4px 16px 16px; background: var(--panel); display: flex; flex-direction: column; gap: 10px; }
+.book-find textarea { width: 100%; line-height: 1.7; }
+.book-find input { flex: 1; min-width: 0; }
+.book-cands { display: flex; flex-direction: column; gap: 6px; }
+.book-cand { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; opacity: .55; }
+.book-cand.on { opacity: 1; border-color: var(--accent); }
+.book-cand label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.book-cand .chips { flex: 1; margin: 0; }
+.book-cand .chip .w { padding: 2px 4px 2px 8px; }
+.book h3 input { font-size: 13px; font-weight: 400; width: 220px; }
+.book-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 0 14px; }
+
+/* 结构：和规整的歌比 */
+.st-shape { font-size: 13px; color: #c9ccd6; line-height: 1.7; margin: 6px 0; }
+.st-table td small { color: var(--dim); }
+.st-table .note { white-space: normal; line-height: 1.5; }
+.st-table tr.st-short td:nth-child(2), .st-table tr.st-long td:nth-child(2) { color: var(--warn); }
+.st-table .note { color: var(--dim); text-align: left; }
+.st-table tr.st-short .note, .st-table tr.st-long .note { color: var(--warn); }
+
+/* 听歌笔记：范围、曲风、星图 */
+.ref-scope input { flex: 1; min-width: 140px; }
+.ref-scope .primary { margin-left: auto; }
+.ref-filter { justify-content: space-between; flex-wrap: wrap; }
+.ref-map { border: 1px solid var(--line); border-radius: 10px; background: #0b0c12; margin: 10px 0 14px; padding: 6px 10px 2px; }
+.ref-map svg { display: block; width: 100%; max-height: 520px; }
+.ref-star { cursor: pointer; }
+.ref-star text { pointer-events: none; }
+.ref-star.on .dot { stroke: #fff; stroke-width: .5; }
+.ref-list li.on { border-color: var(--accent); }
+button.ref-genre { cursor: pointer; }
+/* 页面里的小标签页：记灵感、学歌 */
+.subtabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--line); }
+.subtabs button { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 16px; color: var(--dim); }
+.subtabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
+.subtabs .muted { margin-left: auto; align-self: center; font-size: 12px; }

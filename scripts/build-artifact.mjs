@@ -14,9 +14,13 @@ const entry = js.find((f) => f.startsWith('index-'))
 if (!entry) throw new Error('没找到入口脚本')
 mkdirSync(join(out, 'data'), { recursive: true })
 mkdirSync(join(out, 'models/basic-pitch'), { recursive: true })
-cpSync(join('dist/assets', entry), join(out, 'app.js'))
+// 分块去掉文件名里每次构建都会变的那段，这样发布时文件名是固定的
+const stable = (f) => f.replace(/-[\w-]{8}\.js$/, '.js')
 const chunks = js.filter((f) => f !== entry)
-for (const f of chunks) writeFileSync(join(out, f), readFileSync(join('dist/assets', f), 'utf8').replaceAll(entry, 'app.js'))
+const fix = (code) => chunks.reduce((c, f) => c.replaceAll(f, stable(f)), code.replaceAll(entry, 'app.js'))
+writeFileSync(join(out, 'app.js'), fix(readFileSync(join('dist/assets', entry), 'utf8')))
+for (const f of chunks) writeFileSync(join(out, stable(f)), fix(readFileSync(join('dist/assets', f), 'utf8')))
+cpSync('dist/drums', join(out, 'drums'), { recursive: true })
 cpSync('dist/models/basic-pitch', join(out, 'models/basic-pitch'), { recursive: true })
 cpSync('dist/data/zh-words.txt', join(out, 'data/zh-words.txt'))
 cpSync('dist/data/en-words.txt', join(out, 'data/en-words.txt'))
@@ -25,4 +29,4 @@ writeFileSync(
   join(out, 'index.html'),
   `<title>Rap Rhyme</title>\n<style>${style}</style>\n<div id="root"></div>\n<script type="module" src="app.js"></script>\n`,
 )
-console.log('ok', entry, '分块：', chunks.join(' ') || '无')
+console.log('ok', entry, '分块：', chunks.map(stable).join(' ') || '无')

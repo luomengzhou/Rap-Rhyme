@@ -39,9 +39,12 @@ interface Props {
   /** 韵脚本，和写词页共用 */
   groups: RhymeGroup[]
   setGroups: Dispatch<SetStateAction<RhymeGroup[]>>
-  onSaveAsNew: (text: string) => void
-  /** 草稿还是空的时候，直接把提纲写进去 */
-  onWrite: (text: string) => void
+  /** 用改后稿换掉正在写的稿子（原来的会先备份） */
+  onAdopt: (text: string) => void
+  /** 左边工具条右侧的按钮：存备份、定稿 */
+  tools: ReactNode
+  /** 版本和备份的列表 */
+  history: ReactNode
   /** 给 Claude 的背景数据，如 BPM、小节数 */
   facts: string
   /** 从别的页面带过来、要自动发出的问题 */
@@ -207,7 +210,7 @@ function inline(a: string, b: string): [string, string, string, string, string] 
   return [a.slice(0, p), a.slice(p, a.length - s), b.slice(p, b.length - s), a.slice(a.length - s), b.slice(0, p)]
 }
 
-export function ReviewView({ id, editor, panels, side: tab, setSide: setTab, title, text, state, setState, materials: saved, setMaterials, groups, setGroups, onSaveAsNew, onWrite, facts, ask, clearAsk }: Props) {
+export function ReviewView({ id, editor, panels, side: tab, setSide: setTab, title, text, state, setState, materials: saved, setMaterials, groups, setGroups, onAdopt, tools, history, facts, ask, clearAsk }: Props) {
   const cur: ReviewState = state ?? { review: { title: `${title || '未命名'} · 改稿`, suggestions: [] }, accepted: [], choice: {}, chat: [] }
   const { review, accepted, choice } = cur
   const chat = cur.chat ?? []
@@ -266,7 +269,7 @@ export function ReviewView({ id, editor, panels, side: tab, setSide: setTab, tit
   const toggleMat = (m: Material) =>
     setMaterials((all) => (all.some((x) => x.title === m.title) ? all.filter((x) => x.title !== m.title) : [...all, { ...m, id: 'm' + Math.random().toString(36).slice(2, 10) }]))
 
-  const [left, setLeft] = useState<'write' | 'diff'>('write')
+  const [left, setLeft] = useState<'write' | 'diff' | 'history'>('write')
   const [asideW, setAsideW] = useStored('rr.asideW', 440)
   const [split, setSplit] = useStored('rr.diffSplit', 0.5)
   const root = useRef<HTMLElement>(null)
@@ -445,9 +448,11 @@ export function ReviewView({ id, editor, panels, side: tab, setSide: setTab, tit
           <button className={left === 'diff' ? 'on' : ''} onClick={() => setLeft('diff')}>
             改前改后{nAccepted > 0 || manual !== undefined ? <i className="tag">{manual !== undefined ? '手改过' : `已接受 ${nAccepted} 条`}</i> : null}
           </button>
-          <span className="muted">{left === 'write' ? '这里是你的原稿，随时自动保存。' : '左边原稿不会被动到。中间的线可以拖。'}</span>
+          <button className={left === 'history' ? 'on' : ''} onClick={() => setLeft('history')}>版本和备份</button>
+          <span className="work-tools">{tools}</span>
         </div>
         {left === 'write' && editor}
+        {left === 'history' && history}
       {left === 'diff' && (
       <section className="diff" ref={diffBox} style={{ '--dl': `${split}fr`, '--dr': `${1 - split}fr`, '--dl-n': split } as React.CSSProperties}>
         <Splitter
@@ -458,7 +463,7 @@ export function ReviewView({ id, editor, panels, side: tab, setSide: setTab, tit
           }}
         />
         <div className="diff-head">
-          <div>原稿<small>不会被改动</small></div>
+          <div>现在的稿子</div>
           <div>
             改后<small>已接受 {nAccepted} / {usable.length} 条</small>
             {manual !== undefined && <span className="tag">手改过</span>}
@@ -471,11 +476,20 @@ export function ReviewView({ id, editor, panels, side: tab, setSide: setTab, tit
             ) : (
               <button className="link" title="丢掉手改的内容，回到按建议生成的改后稿" onClick={() => setDropManual(true)}>放弃手改</button>
             ))}
-            {text.trim() ? (
-              <button className="primary" disabled={!changed} onClick={() => onSaveAsNew(final)}>存为新草稿</button>
-            ) : (
-              <button className="primary" disabled={!changed} onClick={() => { onWrite(final); setState({ ...cur, accepted: [], manual: undefined }); setEditing(false) }}>写进这份草稿</button>
-            )}
+            <button
+              className="primary"
+              disabled={!changed}
+              title="现在的稿子会先存一份备份，随时能恢复"
+              onClick={() => {
+                onAdopt(final)
+                setState({ ...cur, accepted: [], manual: undefined, review: { ...review, suggestions: review.suggestions.filter((x) => !accepted.includes(x.id)) } })
+                setEditing(false)
+                setManualMsg('')
+                setLeft('write')
+              }}
+            >
+              {text.trim() ? '用这份改后稿' : '写进这份草稿'}
+            </button>
           </div>
         </div>
         {manualMsg && <p className="muted diff-note">{manualMsg}</p>}

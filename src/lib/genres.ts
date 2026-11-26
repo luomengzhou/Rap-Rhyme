@@ -1,6 +1,6 @@
 // 说唱常见曲风：专用名词、怎么听出来、大概的速度，和一段能听的鼓点骨架。
-// 鼓点是每种曲风最通用的打法，由浏览器合成，不取自任何具体的歌；音色只是示意，真实的味道要去听那个曲风的歌。
-import type { Beat } from './beats'
+// 鼓点是每种曲风最通用的打法，不取自任何具体的歌。鼓声是公共领域的真实采样，按曲风分成几套；旋律是合成的示意。
+import type { Beat, Kit } from './beats'
 
 export interface Genre {
   id: string
@@ -54,10 +54,23 @@ interface Spec {
   h: string
   mood: Mood
   swing?: number
+  /** 用哪套鼓声；不写就用这个家族默认的 */
+  kit?: Kit
   /** 这个曲风不用低音跟底鼓（比如无鼓、清唱感） */
   noBass?: boolean
   plain: string
   search?: string
+}
+
+// 每个家族默认用哪套鼓声
+const FAMILY_KIT: Record<string, Kit> = {
+  '经典 / 东岸': 'acoustic', '西岸 / 匪帮': 'acoustic', '南方 / trap 系': '808', 'drill / 俱乐部': 'drill', '旋律 / 情绪': '808', '迷幻 / 实验': 'soft', '跨界 / 融合': 'club',
+}
+// 和家族默认不一样的曲风
+const KIT_OF: Record<string, Kit> = {
+  chill: 'soft', lofi: 'soft', 'old-school': 'electro', ratchet: '808', hyphy: '808', snap: '808', 'miami-bass': 'electro', bounce: 'club',
+  'jersey-club': 'club', 'club-rap': 'club', rnb: 'soft', gospel: 'acoustic', 'cloud-rap': 'soft', 'chinese-style': '808',
+  horrorcore: 'drill', industrial: 'drill', hyperpop: 'club', 'rap-rock': 'acoustic',
 }
 
 const build = (family: string, list: Spec[]): Genre[] =>
@@ -67,7 +80,7 @@ const build = (family: string, list: Spec[]): Genre[] =>
     if (!g.noBass) [...kick].forEach((c, i) => c === 'x' && (bass[i] = ROOTS[g.mood][i < 16 ? 0 : 1]))
     return {
       id: g.id, en: g.en, zh: g.zh, family, bpm: g.bpm, plain: g.plain, search: g.search ?? g.en,
-      beat: { id: g.id, name: g.en, mood: g.zh, bpm: g.bpm, desc: g.plain, kick, snare: two(g.s), hat: two(g.h), bass, lead: LEADS[g.mood], swing: g.swing },
+      beat: { id: g.id, name: g.en, mood: g.zh, bpm: g.bpm, desc: g.plain, kick, snare: two(g.s), hat: two(g.h), bass, lead: LEADS[g.mood], swing: g.swing, kit: g.kit ?? KIT_OF[g.id] ?? FAMILY_KIT[family] ?? 'acoustic', snap: g.id === 'snap' },
     }
   })
 
